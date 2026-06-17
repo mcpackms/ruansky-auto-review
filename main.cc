@@ -72,81 +72,180 @@
     return out;
 }
 
-// ==================== Aho-Corasick 自动机 ====================
-class AhoCorasick {
-public:
-    struct Node {
-        std::unordered_map<char, int> next;
-        int fail = 0;
-        std::vector<int> outputs;
-        Node() = default;
-    };
+// ==================== DAT + AC 自动机 (双数组 + Aho-Corasick) ====================
+class DoubleArrayAC {
+    // 临时 Trie (构建阶段使用)
+    std::vector<std::vector<std::pair<unsigned char, int>>> trie_ch_;
+    std::vector<std::vector<int>> trie_out_;
+    std::vector<int> trie_dat_pos_;
 
-    AhoCorasick() {
-        nodes_.emplace_back();
+    // DAT 核心数组
+    std::vector<int> base_;
+    std::vector<int> check_;
+    std::vector<int> fail_;
+    std::vector<std::vector<int>> out_;
+
+    static constexpr int ROOT = 0;
+
+    void dat_ensure(int pos) {
+        if (pos >= (int)base_.size()) {
+            int old = base_.size();
+            int new_sz = std::max(pos + 1, old * 2);
+            base_.resize(new_sz, 0);
+            check_.resize(new_sz, -1);
+            fail_.resize(new_sz, 0);
+            out_.resize(new_sz);
+        }
+    }
+
+    // DAT 单步转移: 返回下一位置, 无转移返回 -1
+    [[nodiscard]] int go(int s, unsigned char c) const {
+        if (s >= (int)base_.size()) return -1;
+        int p = base_[s] + (int)c;
+        if (p >= 0 && p < (int)check_.size() && check_[p] == s) return p;
+        return -1;
+    }
+
+public:
+    DoubleArrayAC() {
+        trie_ch_.emplace_back();
+        trie_out_.emplace_back();
+        trie_dat_pos_.push_back(ROOT);
+        dat_ensure(ROOT);
+        base_[ROOT] = 1;
     }
 
     void insert(const std::string& word, int index) {
         int cur = 0;
-        for (char c : word) {
-            if (!nodes_[cur].next.count(c)) {
-                nodes_[cur].next[c] = static_cast<int>(nodes_.size());
-                nodes_.emplace_back();
+        for (char c_ : word) {
+            unsigned char c = static_cast<unsigned char>(c_);
+            auto& children = trie_ch_[cur];
+            auto it = std::find_if(children.begin(), children.end(),
+                [c](const auto& p) { return p.first == c; });
+            if (it != children.end()) {
+                cur = it->second;
+            } else {
+                int nid = trie_ch_.size();
+                trie_ch_.emplace_back();
+                trie_out_.emplace_back();
+                trie_dat_pos_.push_back(-1);
+                children.emplace_back(c, nid);
+                cur = nid;
             }
-            cur = nodes_[cur].next[c];
         }
-        nodes_[cur].outputs.push_back(index);
+        trie_out_[cur].push_back(index);
     }
 
     void build() {
+        int n_trie = trie_ch_.size();
+        if (n_trie == 0) return;
+
+        // === 第1步: BFS 为每个节点分配 DAT 位置 (base + check) ===
         std::queue<int> q;
-        for (auto& [c, next] : nodes_[0].next) {
-            nodes_[next].fail = 0;
-            q.push(next);
-        }
+        q.push(0);
 
         while (!q.empty()) {
             int cur = q.front();
             q.pop();
+            int cur_pos = trie_dat_pos_[cur];
+            auto& children = trie_ch_[cur];
+            if (children.empty()) continue;
 
-            for (auto& [c, next] : nodes_[cur].next) {
-                int fail = nodes_[cur].fail;
-                while (fail != 0 && !nodes_[fail].next.count(c)) {
-                    fail = nodes_[fail].fail;
+            // 寻找合适的 base 值 (从游标开始，避免重复扫描已占位)
+            static int s_next_candidate = 1;
+            int b = s_next_candidate;
+            while (true) {
+                bool ok = true;
+                for (auto& [cc, _] : children) {
+                    int p = b + (int)cc;
+                    if (p < (int)check_.size() && check_[p] != -1) {
+                        ok = false;
+                        break;
+                    }
                 }
-                if (nodes_[fail].next.count(c)) {
-                    nodes_[next].fail = nodes_[fail].next[c];
-                } else {
-                    nodes_[next].fail = 0;
-                }
+                if (ok) break;
+                b++;
+            }
+            s_next_candidate = b;
 
-                const auto& fail_outputs = nodes_[nodes_[next].fail].outputs;
-                nodes_[next].outputs.insert(nodes_[next].outputs.end(),
-                    fail_outputs.begin(),
-                    fail_outputs.end());
-                q.push(next);
+            base_[cur_pos] = b;
+
+            for (auto& [cc, nid] : children) {
+                int p = b + (int)cc;
+                dat_ensure(p);
+                check_[p] = cur_pos;
+                trie_dat_pos_[nid] = p;
+                q.push(nid);
             }
         }
+
+        // === 第2步: 输出数据复制到 DAT ===
+        for (int i = 0; i < n_trie; ++i) {
+            int pos = trie_dat_pos_[i];
+            out_[pos] = std::move(trie_out_[i]);
+        }
+
+        // === 第3步: BFS 构建 fail 链 ===
+        std::queue<int> fq;
+
+        for (auto& [_, nid] : trie_ch_[ROOT]) {
+            int npos = trie_dat_pos_[nid];
+            fail_[npos] = ROOT;
+            out_[npos].insert(out_[npos].end(), out_[ROOT].begin(), out_[ROOT].end());
+            fq.push(nid);
+        }
+
+        while (!fq.empty()) {
+            int cur = fq.front();
+            fq.pop();
+            int cur_pos = trie_dat_pos_[cur];
+
+            for (auto& [cc, nid] : trie_ch_[cur]) {
+                int npos = trie_dat_pos_[nid];
+
+                // 找 fail
+                int f = fail_[cur_pos];
+                while (f != ROOT && go(f, cc) < 0) {
+                    f = fail_[f];
+                }
+                int fn = go(f, cc);
+                fail_[npos] = fn >= 0 ? fn : ROOT;
+
+                // 合并 fail 节点的输出
+                int fail_pos = fail_[npos];
+                out_[npos].insert(out_[npos].end(),
+                    out_[fail_pos].begin(), out_[fail_pos].end());
+
+                fq.push(nid);
+            }
+        }
+
+        // 释放临时内存
+        trie_ch_.clear();
+        trie_ch_.shrink_to_fit();
+        trie_out_.clear();
+        trie_out_.shrink_to_fit();
+        trie_dat_pos_.clear();
+        trie_dat_pos_.shrink_to_fit();
     }
 
+    // 搜索第一个匹配，命中即返回 (内联 go 避免函数调用和冗余边界检查)
     [[nodiscard]] int search_first(const std::string& text) const {
-        int cur = 0;
-        for (char c : text) {
-            while (cur != 0 && !nodes_[cur].next.count(c)) {
-                cur = nodes_[cur].fail;
+        int s = ROOT;
+        for (char c_ : text) {
+            unsigned char c = static_cast<unsigned char>(c_);
+            // 内联 go() 循环 — 沿 fail 链找有效转移
+            while (s != ROOT) {
+                int p = base_[s] + (int)c;
+                if (p < (int)check_.size() && check_[p] == s) break;
+                s = fail_[s];
             }
-            if (nodes_[cur].next.count(c)) {
-                cur = nodes_[cur].next.at(c);
-            }
-            if (!nodes_[cur].outputs.empty()) {
-                return nodes_[cur].outputs[0];
-            }
+            int p = base_[s] + (int)c;
+            if (p < (int)check_.size() && check_[p] == s) s = p;
+            if (!out_[s].empty()) return out_[s][0];
         }
         return -1;
     }
-
-private:
-    std::vector<Node> nodes_;
 };
 
 // ==================== 配置结构 ====================
@@ -203,12 +302,12 @@ struct Config {
 
 struct WordsData {
     std::vector<std::string> words;
-    std::unique_ptr<AhoCorasick> ac_matcher;
+    std::unique_ptr<DoubleArrayAC> ac_matcher;
     bool enabled = false;
 
     void build_ac_matcher() {
         if (!enabled || words.empty()) return;
-        ac_matcher = std::make_unique<AhoCorasick>();
+        ac_matcher = std::make_unique<DoubleArrayAC>();
         for (size_t i = 0; i < words.size(); ++i) {
             ac_matcher->insert(words[i], static_cast<int>(i));
         }
@@ -302,6 +401,7 @@ std::function<TuiFamilyStats(const std::string&)> g_get_family_stats;
 
 // ==================== 一次运行模式 / 主题 ====================
 bool g_once_mode = false;
+bool g_no_tui = false;
 Theme g_theme = Theme::TOKYO_NIGHT;
 
 // ==================== 统计 ====================
@@ -605,64 +705,53 @@ static CurlHandlePtr acquire_curl() {
     return b;
 }
 
-// ==================== 文本检查 ====================
-[[nodiscard]] static bool should_reject(TextChecker& checker, bool ereg, bool ebad) {
-    if (ebad && (!g_bad_words.enabled || !g_bad_words.ac_matcher)) ebad = false;
+// ==================== 文本检查 (单次扫描) ====================
+struct CheckResult {
+    bool should_reject = false;
+    std::string reason;
+};
+
+// 一次扫描完成违禁词 + 正则检查，避免 should_reject + reject_reason 双重扫描
+[[nodiscard]] static CheckResult check_text(TextChecker& checker, bool ereg, bool ebad) {
     if (ereg && !g_regex_data.enabled) ereg = false;
 
     const std::string& lower = checker.to_lower();
 
-    if (ebad) {
+    // 先查违禁词 (AC 自动机，非常快)
+    if (ebad && g_bad_words.enabled && g_bad_words.ac_matcher) {
         int idx = g_bad_words.ac_matcher->search_first(lower);
-        if (idx >= 0) return true;
+        if (idx >= 0) {
+            CheckResult r;
+            r.should_reject = true;
+            if (idx < static_cast<int>(g_bad_words.words.size())) {
+                r.reason = "违禁词:" + g_bad_words.words[idx];
+            }
+            return r;
+        }
     }
 
+    // 再查正则 (PCRE2 相对较慢)
     if (ereg) {
         for (auto& re : g_regex_data.patterns) {
             pcre2_match_data* md = pcre2_match_data_create_from_pattern(re.get(), nullptr);
             int rc = pcre2_match(re.get(), (PCRE2_SPTR)lower.c_str(), lower.size(), 0, 0, md, nullptr);
-            pcre2_match_data_free(md);
-            if (rc >= 0) return true;
-        }
-    }
-
-    return false;
-}
-
-[[nodiscard]] static std::string reject_reason(TextChecker& checker, bool ereg, bool ebad) {
-    std::string r;
-    const std::string& lower = checker.to_lower();
-
-    if (ebad && g_bad_words.enabled && g_bad_words.ac_matcher) {
-        int idx = g_bad_words.ac_matcher->search_first(lower);
-        if (idx >= 0 && idx < static_cast<int>(g_bad_words.words.size())) {
-            r += "违禁词:" + g_bad_words.words[idx];
-        }
-    }
-
-    if (ereg && g_regex_data.enabled) {
-        for (auto& re : g_regex_data.patterns) {
-            std::string match;
-            bool matched = false;
-            pcre2_match_data* md = pcre2_match_data_create_from_pattern(re.get(), nullptr);
-            int rc = pcre2_match(re.get(), (PCRE2_SPTR)lower.c_str(), lower.size(), 0, 0, md, nullptr);
             if (rc >= 0) {
+                CheckResult r;
+                r.should_reject = true;
                 PCRE2_SIZE* ovec = pcre2_get_ovector_pointer(md);
                 PCRE2_SIZE start = ovec[0];
                 PCRE2_SIZE end = ovec[1];
+                std::string match;
                 if (end > start) match = lower.substr(start, end - start);
-                matched = true;
+                r.reason = "正则:" + (match.empty() ? "命中" : match);
+                pcre2_match_data_free(md);
+                return r;
             }
             pcre2_match_data_free(md);
-            if (matched) {
-                if (!r.empty()) r += " ";
-                r += "正则:" + (match.empty() ? "命中" : match);
-                break;
-            }
         }
     }
 
-    return r;
+    return CheckResult{};
 }
 
 // ==================== HTTP 请求 ====================
@@ -1018,8 +1107,9 @@ static void process_items(const ModuleConfig& mod, TokenReviewer* rev,
     tasks.reserve(items.size());
     for (auto& item : items) {
         TextChecker checker(item->full_text);
-        if (should_reject(checker, ereg, ebad)) {
-            tasks.push_back({ItemTask::REJECT, item.get(), reject_reason(checker, ereg, ebad)});
+        auto cr = check_text(checker, ereg, ebad);
+        if (cr.should_reject) {
+            tasks.push_back({ItemTask::REJECT, item.get(), cr.reason});
         } else {
             tasks.push_back({ItemTask::APPROVE, item.get(), ""});
         }
@@ -1084,8 +1174,9 @@ static void process_up_items(const ModuleConfig& mod, TokenReviewer* rev,
     tasks.reserve(items.size());
     for (auto& item : items) {
         TextChecker checker(item->full_text);
-        if (should_reject(checker, ereg, ebad)) {
-            tasks.push_back({ItemTask::REJECT, item.get(), reject_reason(checker, ereg, ebad)});
+        auto cr = check_text(checker, ereg, ebad);
+        if (cr.should_reject) {
+            tasks.push_back({ItemTask::REJECT, item.get(), cr.reason});
         } else {
             tasks.push_back({ItemTask::APPROVE, item.get(), ""});
         }
@@ -1436,6 +1527,8 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-once") == 0) {
             g_once_mode = true;
+        } else if (strcmp(argv[i], "--no-tui") == 0) {
+            g_no_tui = true;
         } else if (strcmp(argv[i], "--config") == 0) {
             if (i + 1 < argc) {
                 g_config_path = argv[++i];
@@ -1499,6 +1592,16 @@ int main(int argc, char* argv[]) {
                 t.join();
             }
             g_log.info("一次运行完成。");
+        } else if (g_no_tui) {
+            // 无 TUI 模式: 日志输出到终端，等待信号退出
+            g_log.info("无TUI模式，按 Ctrl+C 停止...");
+            while (g_running) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+            for (auto& t : threads) {
+                t.join();
+            }
+            g_log.info("已停止。");
         } else {
             // TUI 模式
             // 填充 TUI 家族列表
