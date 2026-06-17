@@ -129,7 +129,7 @@ public:
                 trie_ch_.emplace_back();
                 trie_out_.emplace_back();
                 trie_dat_pos_.push_back(-1);
-                children.emplace_back(c, nid);
+                trie_ch_[cur].emplace_back(c, nid);
                 cur = nid;
             }
         }
