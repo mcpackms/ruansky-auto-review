@@ -1586,6 +1586,15 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // 预填充家族控制标志 (所有模式都需要, 避免多线程竞态)
+        for (auto& r : reviewers) {
+            for (auto& f : r->families) {
+                if (g_family_controls.find(f.family_id) == g_family_controls.end()) {
+                    g_family_controls[f.family_id] = std::make_shared<FamilyControl>();
+                }
+            }
+        }
+
         if (g_once_mode) {
             // 一次运行模式: 等待所有线程完成即退出
             for (auto& t : threads) {
@@ -1617,9 +1626,7 @@ int main(int argc, char* argv[]) {
                     info.join_enabled = f.enable_join && g_config.join.enabled;
                     info.up_enabled = f.enable_up && g_config.up.enabled;
                     info.min_level = f.min_level;
-                    auto ctrl = std::make_shared<FamilyControl>();
-                    info.control = ctrl;
-                    g_family_controls[f.family_id] = ctrl;
+                    info.control = g_family_controls[f.family_id];
                     g_family_list.push_back(std::move(info));
                 }
             }
