@@ -1522,10 +1522,25 @@ static void load_regex_words() {
 }
 
 // ==================== 主函数 ====================
+static void print_help(const char* prog) {
+    printf("high_bot 自动审核 v1.0.0 开源版\n\n");
+    printf("用法: %s [选项]\n\n", prog);
+    printf("选项:\n");
+    printf("  -h, --help      显示此帮助信息\n");
+    printf("  --config <路径>  指定配置文件路径 (默认: settings.toml)\n");
+    printf("  --no-tui        禁用 TUI 界面, 日志输出到终端\n");
+    printf("  -once           每个家族只审核一轮即退出\n");
+    printf("\n");
+    printf("项目地址: https://gitea.com/electricpen/ruansky_auto_review\n");
+}
+
 int main(int argc, char* argv[]) {
     // 解析参数
     for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "-once") == 0) {
+        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            print_help(argc > 0 ? argv[0] : "auto_review");
+            return 0;
+        } else if (strcmp(argv[i], "-once") == 0) {
             g_once_mode = true;
         } else if (strcmp(argv[i], "--no-tui") == 0) {
             g_no_tui = true;
