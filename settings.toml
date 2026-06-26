@@ -4,11 +4,11 @@ API_LEVEL = "36"
 LIMIT = "50"
 BASE_URL = "https://rtkapi2.ruansky.net"
 CHANNEL = "rtk"
-USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 12; JLH-AN00 Build/HONORJLH-AN00)"
+USER_AGENT = "High_bot 1.0.0"
 VERSION = "8740"
-PHONE_MODEL = ""
+PHONE_MODEL = "High_bot"
 REQUEST_DELAY_MS = 10
-OS_INFO = ""
+OS_INFO = "High_bot"
 PAGE = "1"
 # 全局正则开关
 ENABLE_REGEX = true
@@ -23,7 +23,7 @@ THEME = "tokyo-night"
 ENABLE_BADWORDS = true
 # 可选：覆盖全局正则开关
 ENABLE_REGEX = true
-UID = "552141"
+UID = ""
 # 可选：覆盖全局并发数
 CONCURRENCY = 8
 # 可选：覆盖全局请求延迟
