@@ -1571,12 +1571,17 @@ int main(int argc, char* argv[]) {
             reviewers.push_back(std::move(r));
         }
 
+#ifdef _WIN32
+        signal(SIGINT, [](int) { g_running = false; });
+        signal(SIGTERM, [](int) { g_running = false; });
+#else
         struct sigaction sa;
         sa.sa_handler = [](int) { g_running = false; };
         sigemptyset(&sa.sa_mask);
         sa.sa_flags = 0;
         sigaction(SIGINT, &sa, nullptr);
         sigaction(SIGTERM, &sa, nullptr);
+#endif
 
         g_log.info("\n并发:%d\t延迟:%dms\t间隔:%ds\t正则:%s\t主题:%s",
             g_config.concurrency, g_config.request_delay_ms,
