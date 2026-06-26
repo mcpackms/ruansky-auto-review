@@ -14,7 +14,6 @@ sudo apt install -y \
 ```
 ### redhat  
 ``` bash
-# 基础依赖（Fedora / RHEL / CentOS 通用）
 sudo dnf groupinstall -y "Development Tools"
 sudo dnf install -y \
     cmake pkgconf-pkg-config \
