@@ -50,8 +50,7 @@ jobs:
         with:
           arch: aarch64
           distro: ubuntu22.04
-          githubToken: ${{ github.token }}
-          cache: false
+          # 不再提供 githubToken，避免推送缓存
           install: |
             apt-get update
             apt-get install -y \
@@ -80,8 +79,7 @@ jobs:
         with:
           arch: armv7
           distro: ubuntu22.04
-          githubToken: ${{ github.token }}
-          cache: false
+          # 同样不提供 githubToken
           install: |
             apt-get update
             apt-get install -y \
