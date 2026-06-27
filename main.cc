@@ -1082,27 +1082,34 @@ static void process_items(const ModuleConfig& mod, TokenReviewer* rev,
             ItemTask* task = nullptr;
 
             while (queue.pop(task) && g_running) {
-                bool sent = false;
-                if (task->type == ItemTask::REJECT) {
-                    sent = approve_item(mod, task->item->id, task->item->family_id,
-                        task->item->token, task->item->uid,
-                        mod.state3_rejected, is_comment, *ch);
-                    log_action(task->item->token, task->item->family_id, type_label,
-                        task->item->id, sent ? "拒绝" : "拒绝失败", task->reason);
-                    if (sent) {
-                        if (is_comment) rev->add_comment_rejected(task->item->family_id, 1);
-                        else rev->add_post_rejected(task->item->family_id, 1);
+                try {
+                    bool sent = false;
+                    if (task->type == ItemTask::REJECT) {
+                        sent = approve_item(mod, task->item->id, task->item->family_id,
+                            task->item->token, task->item->uid,
+                            mod.state3_rejected, is_comment, *ch);
+                        log_action(task->item->token, task->item->family_id, type_label,
+                            task->item->id, sent ? "拒绝" : "拒绝失败", task->reason);
+                        if (sent) {
+                            if (is_comment) rev->add_comment_rejected(task->item->family_id, 1);
+                            else rev->add_post_rejected(task->item->family_id, 1);
+                        }
+                    } else {
+                        sent = approve_item(mod, task->item->id, task->item->family_id,
+                            task->item->token, task->item->uid,
+                            mod.state3_approved, is_comment, *ch);
+                        log_action(task->item->token, task->item->family_id, type_label,
+                            task->item->id, sent ? "通过" : "通过失败");
+                        if (sent) {
+                            if (is_comment) rev->add_comment_approved(task->item->family_id, 1);
+                            else rev->add_post_approved(task->item->family_id, 1);
+                        }
                     }
-                } else {
-                    sent = approve_item(mod, task->item->id, task->item->family_id,
-                        task->item->token, task->item->uid,
-                        mod.state3_approved, is_comment, *ch);
-                    log_action(task->item->token, task->item->family_id, type_label,
-                        task->item->id, sent ? "通过" : "通过失败");
-                    if (sent) {
-                        if (is_comment) rev->add_comment_approved(task->item->family_id, 1);
-                        else rev->add_post_approved(task->item->family_id, 1);
-                    }
+                } catch (const std::exception& e) {
+                    g_log.error("[%s] %s 家族%s\t%s ID=%s HTTP异常: %s",
+                        now_str().c_str(), mask_token(task->item->token).c_str(),
+                        task->item->family_id.c_str(), type_label.c_str(),
+                        task->item->id.c_str(), e.what());
                 }
                 if (delay_ms > 0) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
@@ -1149,21 +1156,28 @@ static void process_up_items(const ModuleConfig& mod, TokenReviewer* rev,
             ItemTask* task = nullptr;
 
             while (queue.pop(task) && g_running) {
-                bool sent = false;
-                if (task->type == ItemTask::REJECT) {
-                    sent = approve_item(mod, task->item->id, task->item->family_id,
-                        task->item->token, task->item->uid,
-                        mod.state3_rejected, true, *ch);
-                    log_action(task->item->token, task->item->family_id, "UP评论",
-                        task->item->id, sent ? "拒绝" : "拒绝失败", task->reason);
-                    if (sent) rev->add_up_rejected(task->item->family_id, 1);
-                } else {
-                    sent = approve_item(mod, task->item->id, task->item->family_id,
-                        task->item->token, task->item->uid,
-                        mod.state3_approved, true, *ch);
-                    log_action(task->item->token, task->item->family_id, "UP评论",
-                        task->item->id, sent ? "通过" : "通过失败");
-                    if (sent) rev->add_up_approved(task->item->family_id, 1);
+                try {
+                    bool sent = false;
+                    if (task->type == ItemTask::REJECT) {
+                        sent = approve_item(mod, task->item->id, task->item->family_id,
+                            task->item->token, task->item->uid,
+                            mod.state3_rejected, true, *ch);
+                        log_action(task->item->token, task->item->family_id, "UP评论",
+                            task->item->id, sent ? "拒绝" : "拒绝失败", task->reason);
+                        if (sent) rev->add_up_rejected(task->item->family_id, 1);
+                    } else {
+                        sent = approve_item(mod, task->item->id, task->item->family_id,
+                            task->item->token, task->item->uid,
+                            mod.state3_approved, true, *ch);
+                        log_action(task->item->token, task->item->family_id, "UP评论",
+                            task->item->id, sent ? "通过" : "通过失败");
+                        if (sent) rev->add_up_approved(task->item->family_id, 1);
+                    }
+                } catch (const std::exception& e) {
+                    g_log.error("[%s] %s 家族%s\tUP评论 ID=%s HTTP异常: %s",
+                        now_str().c_str(), mask_token(task->item->token).c_str(),
+                        task->item->family_id.c_str(),
+                        task->item->id.c_str(), e.what());
                 }
                 if (delay_ms > 0) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
@@ -1198,22 +1212,29 @@ static void process_join_items(const ModuleConfig& mod, TokenReviewer* rev,
             nlohmann::json* item = nullptr;
 
             while (queue.pop(item) && g_running) {
-                int level = extract_level(*item);
                 std::string id;
-                if ((*item).contains("id")) {
-                    if ((*item)["id"].is_string()) id = (*item)["id"].get<std::string>();
-                    else if ((*item)["id"].is_number_integer()) id = std::to_string((*item)["id"].get<int64_t>());
-                    else id = (*item)["id"].dump();
-                }
-                if (fam.min_level != -1 && level < fam.min_level) {
-                    bool ok = operate_join(mod, *item, fam, rev->token, rev->uid, *ch);
-                    if (ok) rejected++; else failed++;
-                    log_action(rev->token, fam.family_id, "加入", id,
-                        ok ? "拒绝" : "拒绝失败", "等级不足 Lv" + std::to_string(level));
-                } else {
-                    bool ok = operate_join(mod, *item, fam, rev->token, rev->uid, *ch);
-                    if (ok) approved++; else failed++;
-                    log_action(rev->token, fam.family_id, "加入", id, ok ? "通过" : "通过失败");
+                try {
+                    int level = extract_level(*item);
+                    if ((*item).contains("id")) {
+                        if ((*item)["id"].is_string()) id = (*item)["id"].get<std::string>();
+                        else if ((*item)["id"].is_number_integer()) id = std::to_string((*item)["id"].get<int64_t>());
+                        else id = (*item)["id"].dump();
+                    }
+                    if (fam.min_level != -1 && level < fam.min_level) {
+                        bool ok = operate_join(mod, *item, fam, rev->token, rev->uid, *ch);
+                        if (ok) rejected++; else failed++;
+                        log_action(rev->token, fam.family_id, "加入", id,
+                            ok ? "拒绝" : "拒绝失败", "等级不足 Lv" + std::to_string(level));
+                    } else {
+                        bool ok = operate_join(mod, *item, fam, rev->token, rev->uid, *ch);
+                        if (ok) approved++; else failed++;
+                        log_action(rev->token, fam.family_id, "加入", id, ok ? "通过" : "通过失败");
+                    }
+                } catch (const std::exception& e) {
+                    g_log.error("[%s] %s 家族%s\t加入 ID=%s HTTP异常: %s",
+                        now_str().c_str(), mask_token(rev->token).c_str(),
+                        fam.family_id.c_str(), id.c_str(), e.what());
+                    failed++;
                 }
                 if (delay_ms > 0) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
