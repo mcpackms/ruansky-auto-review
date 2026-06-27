@@ -45,6 +45,7 @@
 #include <functional>
 
 #include "tui.h"
+#include "web_panel.h"
 
 // ==================== 辅助函数 ====================
 [[nodiscard]] static int safe_stoi(const std::string& s, int default_val = -1) {
@@ -248,57 +249,7 @@ public:
     }
 };
 
-// ==================== 配置结构 ====================
-struct FamilyConfig {
-    std::string family_id;
-    std::string mid;
-    bool enable_post = false;
-    bool enable_comment = false;
-    bool enable_join = false;
-    bool enable_up = false;
-    int min_level = -1;
-};
-
-struct TokenConfig {
-    std::string token;
-    std::string uid;
-    std::vector<FamilyConfig> families;
-    std::optional<bool> enable_regex;
-    std::optional<bool> enable_bad_words;
-    std::optional<int> concurrency;
-    std::optional<int> request_delay_ms;
-};
-
-struct ModuleConfig {
-    bool enabled = false;
-    std::string list_endpoint;
-    std::string operate_endpoint;
-    std::string state3_pending;
-    std::string state3_approved;
-    std::string state3_rejected;
-};
-
-struct Config {
-    std::string sign_const;
-    std::string base_url;
-    std::string api_level;
-    std::string version;
-    std::string channel;
-    std::string phone_model;
-    std::string os_info;
-    std::vector<TokenConfig> tokens;
-    ModuleConfig post;
-    ModuleConfig comment;
-    ModuleConfig join;
-    ModuleConfig up;
-    std::string page;
-    std::string limit;
-    int check_interval_seconds = 300;
-    int request_delay_ms = 100;
-    int concurrency = 2;
-    std::string user_agent;
-    bool enable_regex = false;
-};
+#include "config_types.h"
 
 struct WordsData {
     std::vector<std::string> words;
@@ -355,6 +306,12 @@ WordsData g_bad_words;
 RegexData g_regex_data;
 std::string g_config_path = "settings.toml";
 
+// Web 面板访问器（避免包含 DoubleArrayAC 定义）
+int get_bad_words_count() { return static_cast<int>(g_bad_words.words.size()); }
+bool get_bad_words_enabled() { return g_bad_words.enabled; }
+int get_regex_patterns_count() { return static_cast<int>(g_regex_data.patterns.size()); }
+bool get_regex_enabled() { return g_regex_data.enabled; }
+
 // ==================== 线程安全日志 ====================
 class Logger {
     std::mutex mtx_;
@@ -402,6 +359,7 @@ std::function<TuiFamilyStats(const std::string&)> g_get_family_stats;
 // ==================== 一次运行模式 / 主题 ====================
 bool g_once_mode = false;
 bool g_no_tui = false;
+int g_start_time = 0;
 Theme g_theme = Theme::TOKYO_NIGHT;
 
 // ==================== 统计 ====================
@@ -1443,6 +1401,19 @@ static void load_config(const std::string& path = "settings.toml") {
         else if (t == "light") g_theme = Theme::LIGHT;
     }
 
+    if (data.contains("TUI")) {
+        auto& tui_sec = data.at("TUI");
+        g_config.tui_enabled = toml::find<bool>(tui_sec, "ENABLED");
+    }
+
+    if (data.contains("WEB")) {
+        auto& web_sec = data.at("WEB");
+        g_config.web.enabled = toml::find<bool>(web_sec, "ENABLED");
+        g_config.web.port = toml::find<int>(web_sec, "PORT");
+        g_config.web.bind = toml::find<std::string>(web_sec, "BIND");
+        g_config.web.root = toml::find<std::string>(web_sec, "ROOT");
+    }
+
     auto load_mod = [&](const std::string& key, ModuleConfig& mod) {
         auto& sec = toml::find(data, key);
         mod.enabled = toml::find<bool>(sec, "ENABLED");
@@ -1531,6 +1502,12 @@ static void print_help(const char* prog) {
     printf("  --no-tui        禁用 TUI 界面, 日志输出到终端\n");
     printf("  -once           每个家族只审核一轮即退出\n");
     printf("\n");
+    printf("配置文件 settings.toml 中的可用设置:\n");
+    printf("  [TUI]  ENABLED     是否启用 TUI 界面 (默认: true)\n");
+    printf("  [WEB]  ENABLED     是否启用 Web 管理面板 (默认: false)\n");
+    printf("  [WEB]  PORT        Web 端口 (默认: 2356)\n");
+    printf("  [WEB]  BIND        Web 监听地址 (默认: 127.0.0.1)\n");
+    printf("  [WEB]  ROOT        Web 静态文件目录 (默认: ./web)\n");
     printf("项目地址: https://gitea.com/electricpen/ruansky_auto_review\n");
 }
 
@@ -1548,7 +1525,7 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc) {
                 g_config_path = argv[++i];
             } else {
-                g_log.error("--config 需要指定路径");
+                g_log.error("--config\t需要指定路径");
                 return 1;
             }
         }
@@ -1556,8 +1533,14 @@ int main(int argc, char* argv[]) {
 
     curl_global_init(CURL_GLOBAL_ALL);
     try {
+        g_start_time = static_cast<int>(time(nullptr));
         g_log.info("high_bot自动审核 v1.0.0 开源版");
+        g_log.info("配置文件:\t%s", g_config_path.c_str());
         load_config(g_config_path);
+
+        // CLI 参数 --no-tui 覆盖配置文件中的 [TUI] ENABLED
+        if (g_no_tui) g_config.tui_enabled = false;
+
         load_bad_words();
         load_regex_words();
 
@@ -1615,72 +1598,80 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // 启动 Web 管理面板
+        std::thread web_thread;
+        if (g_config.web.enabled) {
+            web_thread = std::thread([&]() {
+                run_web_server(g_config.web.port, g_config.web.root, g_config.web.bind);
+            });
+            web_thread.detach();
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        // ===== 填充家族列表（所有模式共用，Web 面板需要） =====
+        for (auto& r : reviewers) {
+            std::string mask = mask_token(r->token);
+            for (auto& f : r->families) {
+                TuiFamilyInfo info;
+                info.family_id = f.family_id;
+                info.token_mask = mask;
+                info.uid = r->uid;
+                info.post_enabled = f.enable_post && g_config.post.enabled;
+                info.comment_enabled = f.enable_comment && g_config.comment.enabled;
+                info.join_enabled = f.enable_join && g_config.join.enabled;
+                info.up_enabled = f.enable_up && g_config.up.enabled;
+                info.min_level = f.min_level;
+                info.control = g_family_controls[f.family_id];
+                g_family_list.push_back(std::move(info));
+            }
+        }
+
+        // ===== 设置统计回调（所有模式共用） =====
+        g_get_family_stats = [&reviewers](const std::string& fid) -> TuiFamilyStats {
+            TuiFamilyStats s;
+            for (auto& r : reviewers) {
+                for (auto& f : r->families) {
+                    if (f.family_id == fid) {
+                        auto& ps = r->get_post_stats(fid);
+                        s.post_total = ps.total.load();
+                        s.post_approved = ps.approved.load();
+                        s.post_rejected = ps.rejected.load();
+                        auto& cs = r->get_comment_stats(fid);
+                        s.comment_total = cs.total.load();
+                        s.comment_approved = cs.approved.load();
+                        s.comment_rejected = cs.rejected.load();
+                        auto& js = r->get_join_stats(fid);
+                        s.join_total = js.total.load();
+                        s.join_approved = js.approved.load();
+                        s.join_rejected = js.rejected.load();
+                        auto& us = r->get_up_stats(fid);
+                        s.up_total = us.total.load();
+                        s.up_approved = us.approved.load();
+                        s.up_rejected = us.rejected.load();
+                        return s;
+                    }
+                }
+            }
+            return s;
+        };
+
         if (g_once_mode) {
             // 一次运行模式: 等待所有线程完成即退出
             for (auto& t : threads) {
                 t.join();
             }
-            g_log.info("一次运行完成。");
-        } else if (g_no_tui) {
-            // 无 TUI 模式: 日志输出到终端，等待信号退出
-            g_log.info("无TUI模式，按 Ctrl+C 停止...");
+            g_log.info("一次运行完成");
+        } else if (!g_config.tui_enabled) {
+            g_log.info("无TUI模式，按 Ctrl+C 停止");
             while (g_running) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
             }
             for (auto& t : threads) {
                 t.join();
             }
-            g_log.info("已停止。");
+            g_log.info("已停止");
         } else {
             // TUI 模式
-            // 填充 TUI 家族列表
-            for (auto& r : reviewers) {
-                std::string mask = mask_token(r->token);
-                for (auto& f : r->families) {
-                    TuiFamilyInfo info;
-                    info.family_id = f.family_id;
-                    info.token_mask = mask;
-                    info.uid = r->uid;
-                    info.post_enabled = f.enable_post && g_config.post.enabled;
-                    info.comment_enabled = f.enable_comment && g_config.comment.enabled;
-                    info.join_enabled = f.enable_join && g_config.join.enabled;
-                    info.up_enabled = f.enable_up && g_config.up.enabled;
-                    info.min_level = f.min_level;
-                    info.control = g_family_controls[f.family_id];
-                    g_family_list.push_back(std::move(info));
-                }
-            }
-
-            // 设置 TUI 统计回调
-            g_get_family_stats = [&reviewers](const std::string& fid) -> TuiFamilyStats {
-                TuiFamilyStats s;
-                for (auto& r : reviewers) {
-                    for (auto& f : r->families) {
-                        if (f.family_id == fid) {
-                            auto& ps = r->get_post_stats(fid);
-                            s.post_total = ps.total.load();
-                            s.post_approved = ps.approved.load();
-                            s.post_rejected = ps.rejected.load();
-                            auto& cs = r->get_comment_stats(fid);
-                            s.comment_total = cs.total.load();
-                            s.comment_approved = cs.approved.load();
-                            s.comment_rejected = cs.rejected.load();
-                            auto& js = r->get_join_stats(fid);
-                            s.join_total = js.total.load();
-                            s.join_approved = js.approved.load();
-                            s.join_rejected = js.rejected.load();
-                            auto& us = r->get_up_stats(fid);
-                            s.up_total = us.total.load();
-                            s.up_approved = us.approved.load();
-                            s.up_rejected = us.rejected.load();
-                            return s;
-                        }
-                    }
-                }
-                return s;
-            };
-
-            // 运行 TUI (阻塞直到用户退出)
             g_log.set_tui_mode(true);
             run_tui();
             g_log.set_tui_mode(false);
@@ -1690,10 +1681,10 @@ int main(int argc, char* argv[]) {
             for (auto& t : threads) {
                 t.join();
             }
-            g_log.info("已停止。");
+            g_log.info("已停止");
         }
     } catch (const std::exception& e) {
-        g_log.error("❌\t%s", e.what());
+        g_log.error("❌\t异常: %s", e.what());
     }
     curl_global_cleanup();
     return 0;

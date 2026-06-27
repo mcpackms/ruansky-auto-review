@@ -250,7 +250,7 @@ static void toggle_pause(int idx) {
     bool new_state = !info.control->paused.load();
     info.control->paused.store(new_state);
     std::string action = new_state ? "⏸ 暂停" : "▶ 恢复";
-    g_log_queue.push("[" + t_now() + "] [TUI] " + action + " 家族" + info.family_id);
+    g_log_queue.push("[" + t_now() + "] [TUI] " + action + "\t家族" + info.family_id);
 }
 
 // ======================== 主界面渲染 ========================
@@ -599,13 +599,13 @@ static void handle_config_input(int ch) {
     case 'q': case 'Q':
         if (g_config_dirty) {
             // 提示未保存
-            g_log_queue.push("[" + t_now() + "] [TUI] ⚠ 配置已修改但未保存（按 S 保存）");
+            g_log_queue.push("[" + t_now() + "] [TUI] ⚠\t配置已修改但未保存，按 S 保存");
         }
         g_mode = VIEW_MAIN;
         break;
     case 's': case 'S':
         save_edit_toml();
-        g_log_queue.push("[" + t_now() + "] [TUI] ✅ 配置已保存到 settings.toml");
+        g_log_queue.push("[" + t_now() + "] [TUI] ✅\t配置已保存到 settings.toml");
         break;
     case 'e': case 'E': {
         // 外部编辑器
@@ -618,7 +618,7 @@ static void handle_config_input(int ch) {
         // 重新加载
         refresh();
         load_edit_toml();
-        g_log_queue.push("[" + t_now() + "] [TUI] ✅ 配置已重新加载");
+        g_log_queue.push("[" + t_now() + "] [TUI] ✅\t配置已重新加载");
         break;
     }
     case ' ': // Space toggle bool

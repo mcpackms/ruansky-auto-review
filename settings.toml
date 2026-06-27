@@ -1,4 +1,3 @@
-# ==================== 全局配置 ====================
 SIGN_CONST = "P.8CGq@Wr~Vs]!4!"
 API_LEVEL = "36"
 LIMIT = "50"
@@ -10,23 +9,25 @@ PHONE_MODEL = "High_bot"
 REQUEST_DELAY_MS = 10
 OS_INFO = "High_bot"
 PAGE = "1"
-# 全局正则开关
 ENABLE_REGEX = true
 CHECK_INTERVAL_SECONDS = 50
 CONCURRENCY = 8
-# 界面主题: tokyo-night / dark / light
 THEME = "tokyo-night"
 
-# ==================== Token 配置 ====================
+[TUI]
+ENABLED = true
+
+[WEB]
+ENABLED = true
+PORT = 2356
+BIND = "0.0.0.0"
+ROOT = "./web"
+
 [[TOKENS]]
-# 可选：覆盖违禁词开关
 ENABLE_BADWORDS = true
-# 可选：覆盖全局正则开关
 ENABLE_REGEX = true
 UID = ""
-# 可选：覆盖全局并发数
 CONCURRENCY = 8
-# 可选：覆盖全局请求延迟
 REQUEST_DELAY_MS = 25
 TOKEN = ""
 
@@ -48,13 +49,10 @@ ENABLE_COMMENT = true
 ENABLE_POST = true
 FAMILY_ID = ""
 
-
 [[TOKENS]]
 TOKEN = ""
 UID = ""
-# 可选：覆盖全局正则开关
 ENABLE_REGEX = true
-# 可选：覆盖违禁词开关
 ENABLE_BADWORDS = true
 
 [[TOKENS.FAMILIES]]
@@ -66,8 +64,6 @@ ENABLE_COMMENT = true
 ENABLE_POST = true
 FAMILY_ID = ""
 
-#之后可任意增加
-# ==================== 审核模块接口配置 ====================
 [JOIN]
 ENABLED = true
 LIST_ENDPOINT = "/family/join/user-list"
@@ -75,6 +71,7 @@ OPERATE_ENDPOINT = "/family/join/user-result"
 STATE3_PENDING = "1"
 STATE3_APPROVED = "3"
 STATE3_REJECTED = "2"
+
 [UP]
 ENABLED = true
 LIST_ENDPOINT = "/family/up/check-comment/list"
@@ -82,6 +79,7 @@ OPERATE_ENDPOINT = "/family/up/check-comment/operate"
 STATE3_PENDING = "1"
 STATE3_APPROVED = "3"
 STATE3_REJECTED = "2"
+
 [POST]
 ENABLED = true
 LIST_ENDPOINT = "/family/bbs/check/list"
@@ -89,6 +87,7 @@ OPERATE_ENDPOINT = "/family/bbs/check/operate"
 STATE3_PENDING = "1"
 STATE3_APPROVED = "3"
 STATE3_REJECTED = "2"
+
 [COMMENT]
 ENABLED = true
 LIST_ENDPOINT = "/family/bbs/check-comment/list"
@@ -96,4 +95,3 @@ OPERATE_ENDPOINT = "/family/bbs/check-comment/operate"
 STATE3_PENDING = "1"
 STATE3_APPROVED = "3"
 STATE3_REJECTED = "2"
-

@@ -44,10 +44,12 @@ endif()
 set(SOURCES
     main.cc
     tui.cc
+    web_panel.cc
 )
 
 set(HEADERS
     tui.h
+    web_panel.h
 )
 
 # ==================== 可执行文件 ====================
@@ -55,6 +57,7 @@ add_executable(auto_review ${SOURCES} ${HEADERS})
 
 target_include_directories(auto_review PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party
     ${NCURSES_INCLUDE_DIRS}
     ${PCRE2_INCLUDE_DIRS}
     ${NLOHMANN_JSON_INCLUDE_DIRS}
@@ -69,6 +72,7 @@ target_link_libraries(auto_review PRIVATE
     ${CURL_LIBRARIES}
     ${OPENSSL_CRYPTO_LIBRARY}
     ${PCRE2_LIBRARIES}
+    pthread
 )
 
 # ==================== 编译选项 ====================
