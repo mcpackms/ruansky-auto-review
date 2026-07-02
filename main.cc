@@ -1529,7 +1529,7 @@ static void print_help(const char* prog) {
     printf("  [WEB]  PORT        Web 端口 (默认: 2356)\n");
     printf("  [WEB]  BIND        Web 监听地址 (默认: 127.0.0.1)\n");
     printf("  [WEB]  ROOT        Web 静态文件目录 (默认: ./web)\n");
-    printf("项目地址: https://gitea.com/electricpen/ruansky_auto_review\n");
+    printf("项目地址: https://github.com/mcpackms/ruansky_auto_review.git\n");
 }
 
 int main(int argc, char* argv[]) {
