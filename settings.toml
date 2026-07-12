@@ -12,6 +12,7 @@ PAGE = "1"
 ENABLE_REGEX = true
 CHECK_INTERVAL_SECONDS = 50
 CONCURRENCY = 8
+MAX_UP_RESOURCE_COIN = 3
 THEME = "tokyo-night"
 
 [TUI]
@@ -38,6 +39,8 @@ ENABLE_COMMENT = true
 ENABLE_JOIN = false
 MID = ""
 ENABLE_UP = true
+ENABLE_UP_RESOURCE = false
+MAX_UP_RESOURCE_COIN = -1
 MIN_LEVEL = -1
 
 [[TOKENS.FAMILIES]]
@@ -47,6 +50,8 @@ MID = ""
 ENABLE_JOIN = false
 ENABLE_COMMENT = true
 ENABLE_POST = true
+ENABLE_UP_RESOURCE = false
+MAX_UP_RESOURCE_COIN = -1
 FAMILY_ID = ""
 
 [[TOKENS]]
@@ -62,6 +67,8 @@ MID = ""
 ENABLE_JOIN = false
 ENABLE_COMMENT = true
 ENABLE_POST = true
+ENABLE_UP_RESOURCE = false
+MAX_UP_RESOURCE_COIN = -1
 FAMILY_ID = ""
 
 [JOIN]
@@ -76,6 +83,14 @@ STATE3_REJECTED = "2"
 ENABLED = true
 LIST_ENDPOINT = "/family/up/check-comment/list"
 OPERATE_ENDPOINT = "/family/up/check-comment/operate"
+STATE3_PENDING = "1"
+STATE3_APPROVED = "3"
+STATE3_REJECTED = "2"
+
+[UP_RESOURCE]
+ENABLED = true
+LIST_ENDPOINT = "/family/up/check/list"
+OPERATE_ENDPOINT = "/family/up/check/operate"
 STATE3_PENDING = "1"
 STATE3_APPROVED = "3"
 STATE3_REJECTED = "2"

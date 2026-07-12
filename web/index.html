@@ -61,7 +61,7 @@ h1,h2,h3,h4{font-weight:500;letter-spacing:-0.02em;color:#111}
 .lang-btn.active{background:#2F3437;border-color:#2F3437;color:#FFF;font-weight:500}
 @media(prefers-color-scheme:dark){.lang-btn.active{background:#EEE;border-color:#EEE;color:#1A1B1E}}
 .stats-grid{
-  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+  display:grid;grid-template-columns:repeat(5,1fr);gap:1px;
   border-bottom:1px solid #EAEAEA;flex-shrink:0
 }
 @media(prefers-color-scheme:dark){.stats-grid{border-bottom-color:#2C2D30}}
@@ -79,8 +79,28 @@ h1,h2,h3,h4{font-weight:500;letter-spacing:-0.02em;color:#111}
 .section-head .count{font-size:0.75rem;color:#A8A7A2;font-weight:400}
 .section-head .count em{font-style:normal;color:#2F3437}
 @media(prefers-color-scheme:dark){.section-head .count em{color:#D1D0CB}}
-.table-scroll{overflow:auto;border:1px solid #EAEAEA;border-radius:8px;background:#FFF}
-@media(prefers-color-scheme:dark){.table-scroll{border-color:#2C2D30;background:#1F2023}}
+.table-scroll{overflow:auto;border:1px solid #EAEAEA;border-radius:8px;background:#FFF;
+  background:
+    linear-gradient(to right, #FFF 30%, transparent),
+    linear-gradient(to left, #FFF 30%, transparent) 100% 0,
+    radial-gradient(farthest-side at 0 50%, rgba(0,0,0,.08), transparent),
+    radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,.08), transparent);
+  background-repeat:no-repeat;
+  background-attachment:local, local, scroll, scroll;
+  background-size:40px 100%, 40px 100%, 14px 100%, 14px 100%;
+}
+@media(prefers-color-scheme:dark){
+  .table-scroll{border-color:#2C2D30;background:#1F2023;
+    background:
+      linear-gradient(to right, #1F2023 30%, transparent),
+      linear-gradient(to left, #1F2023 30%, transparent) 100% 0,
+      radial-gradient(farthest-side at 0 50%, rgba(255,255,255,.06), transparent),
+      radial-gradient(farthest-side at 100% 50%, rgba(255,255,255,.06), transparent);
+    background-repeat:no-repeat;
+    background-attachment:local, local, scroll, scroll;
+    background-size:40px 100%, 40px 100%, 14px 100%, 14px 100%;
+  }
+}
 .family-table{width:100%;border-collapse:collapse;font-size:0.8125rem}
 .family-table thead th{
   position:sticky;top:0;z-index:1;
@@ -145,7 +165,7 @@ h1,h2,h3,h4{font-weight:500;letter-spacing:-0.02em;color:#111}
 .mod-tag.off{background:#F3F2F0;color:#A8A7A2}
 @media(prefers-color-scheme:dark){.mod-tag{background:#2C2D30;color:#6A6B6E}}
 @media(prefers-color-scheme:dark){.mod-tag.on{background:#1C2D20;color:#9ECE6A}}
-.detail-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.detail-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
 .detail-stat{font-size:0.75rem;color:#A8A7A2}
 .detail-stat .num{font-size:1rem;font-weight:500;color:#111;font-family:"SF Mono","Geist Mono",monospace}
 @media(prefers-color-scheme:dark){.detail-stat .num{color:#EEE}}
@@ -201,21 +221,47 @@ h1,h2,h3,h4{font-weight:500;letter-spacing:-0.02em;color:#111}
 .dot-indicator.err{background:#9F2F2D}
 @media(prefers-color-scheme:dark){.dot-indicator.on{background:#9ECE6A}}
 @media(max-width:900px){
-  .stats-grid{grid-template-columns:repeat(2,1fr)}
-  .stat-cell:nth-child(2){border-right:none}
-  .detail-stats{grid-template-columns:repeat(2,1fr)}
+  .stats-grid{grid-template-columns:repeat(3,1fr)}
+  .detail-stats{grid-template-columns:repeat(3,1fr)}
   .family-table{font-size:0.75rem}
   .header{padding:0 16px}
   .main{padding:16px}
   .stat-cell{padding:14px 16px}
 }
+@media(max-width:768px){
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+  .family-table .col-token{display:none}
+  .family-table .col-rate{display:none}
+  .family-table .col-stat{min-width:65px}
+}
 @media(max-width:600px){
   .stats-grid{grid-template-columns:1fr}
   .stat-cell{border-right:none}
+  .detail-stats{grid-template-columns:repeat(2,1fr)}
   .header-right .uptime{display:none}
-  .family-table .col-token{display:none}
-  .family-table .col-rate{display:none}
+  .header-left .header-logo{display:none}
+  .family-table .col-id{display:none}
+  .family-table .col-stat{min-width:55px}
+  .family-table tbody td{padding:8px 6px}
+  .family-table thead th{padding:8px 6px}
+  .table-scroll{border-radius:6px}
+  .detail-card{padding:12px}
+  .detail-header{flex-direction:column;align-items:flex-start;gap:6px}
 }
+@media(max-width:480px){
+  .header-left .header-status .status-text{display:none}
+  .header-right .lang-btn{min-width:30px;padding:2px 6px;font-size:0.625rem}
+  .family-table .col-stat{min-width:48px;font-size:0.6875rem}
+  .family-table .col-status{min-width:40px}
+  .family-table tbody td{padding:6px 4px}
+  .family-table thead th{padding:6px 4px;font-size:0.625rem}
+  .main{padding:10px;gap:12px}
+  .stat-cell{padding:10px 12px}
+  .stat-cell .stat-value{font-size:1.25rem}
+  .section-head{flex-direction:column;align-items:flex-start;gap:4px}
+}
+
+
 </style>
 </head>
 <body>
@@ -255,6 +301,10 @@ h1,h2,h3,h4{font-weight:500;letter-spacing:-0.02em;color:#111}
     <div class="stat-value" id="statBadWords">-</div>
     <div class="stat-sub" data-i="statBadWords">bad words <em id="statBadWordsEnabled">-</em> / patterns <em id="statRegexCount">-</em></div>
   </div>
+  <div class="stat-cell">
+    <div class="stat-value" id="statMaxCoin">-</div>
+    <div class="stat-sub" data-i="statMaxCoin">max coin <em id="statUpResource">-</em></div>
+  </div>
 </div>
 
 <div class="main">
@@ -272,11 +322,12 @@ h1,h2,h3,h4{font-weight:500;letter-spacing:-0.02em;color:#111}
           <th class="col-stat" data-i="thComments">Comments</th>
           <th class="col-stat" data-i="thJoins">Joins</th>
           <th class="col-stat" data-i="thUp">UP</th>
+          <th class="col-stat" data-i="thUpResource">UP Res</th>
           <th class="col-rate" data-i="thRate">Rate</th>
           <th class="col-status" data-i="thStatus">Status</th>
         </tr></thead>
         <tbody id="familyTbody">
-          <tr><td colspan="8" class="table-empty" data-i="loading">Loading...</td></tr>
+          <tr><td colspan="9" class="table-empty" data-i="loading">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -299,6 +350,7 @@ h1,h2,h3,h4{font-weight:500;letter-spacing:-0.02em;color:#111}
         <div class="detail-stat"><div data-i="dComments">Comments</div><div class="num" id="dCommentTotal">-</div><span class="s-rate" id="dCommentRate">-</span></div>
         <div class="detail-stat"><div data-i="dJoins">Joins</div><div class="num" id="dJoinTotal">-</div><span class="s-rate" id="dJoinRate">-</span></div>
         <div class="detail-stat"><div data-i="dUp">UP</div><div class="num" id="dUpTotal">-</div><span class="s-rate" id="dUpRate">-</span></div>
+        <div class="detail-stat"><div data-i="dUpResource">UP Resource</div><div class="num" id="dUpResourceTotal">-</div><span class="s-rate" id="dUpResourceRate">-</span></div>
       </div>
     </div>
   </div>
@@ -322,13 +374,13 @@ h1,h2,h3,h4{font-weight:500;letter-spacing:-0.02em;color:#111}
 var I18N={
   en:{
     statusCheck:'Checking',statusRunning:'Running',statusStopped:'Stopped',
-    statFamilies:'families online',statConcurrency:'concurrency &#183;',statInterval:'check interval &#183; regex',statBadWords:'bad words',
+    statFamilies:'families online',statConcurrency:'concurrency &#183;',statInterval:'check interval &#183; regex',statBadWords:'bad words',statMaxCoin:'max coin',
     titleFamilies:'Families',online:'online',
-    thId:'ID',thToken:'Token',thPosts:'Posts',thComments:'Comments',thJoins:'Joins',thUp:'UP',thRate:'Rate',thStatus:'Status',
+    thId:'ID',thToken:'Token',thPosts:'Posts',thComments:'Comments',thJoins:'Joins',thUp:'UP',thUpResource:'UP Res',thRate:'Rate',thStatus:'Status',
     loading:'Loading...',
     selectHint:'Select a family to inspect',
     family:'Family',token:'Token',last:'Last',
-    dPosts:'Posts',dComments:'Comments',dJoins:'Joins',dUp:'UP',
+    dPosts:'Posts',dComments:'Comments',dJoins:'Joins',dUp:'UP',dUpResource:'UP Resource',
     logTitle:'Log',pause:'Pause',resume:'Resume',clear:'Clear',
     logEmpty:'Awaiting log output...',logCleared:'Log cleared',
     refresh:'Refresh',
@@ -338,13 +390,13 @@ var I18N={
   },
   zh:{
     statusCheck:'检测中',statusRunning:'运行中',statusStopped:'已停止',
-    statFamilies:'家族在线',statConcurrency:'并发 &#183;',statInterval:'检查间隔 &#183; 正则',statBadWords:'违禁词',
+    statFamilies:'家族在线',statConcurrency:'并发 &#183;',statInterval:'检查间隔 &#183; 正则',statBadWords:'违禁词',statMaxCoin:'最大金币',
     titleFamilies:'家族列表',online:'在线',
-    thId:'ID',thToken:'令牌',thPosts:'帖子',thComments:'评论',thJoins:'加入',thUp:'UP',thRate:'通过率',thStatus:'状态',
+    thId:'ID',thToken:'令牌',thPosts:'帖子',thComments:'评论',thJoins:'加入',thUp:'UP',thUpResource:'UP资源',thRate:'通过率',thStatus:'状态',
     loading:'加载中...',
     selectHint:'选择一个家族查看详情',
     family:'家族',token:'令牌',last:'最近活动',
-    dPosts:'帖子',dComments:'评论',dJoins:'加入',dUp:'UP',
+    dPosts:'帖子',dComments:'评论',dJoins:'加入',dUp:'UP',dUpResource:'UP资源',
     logTitle:'日志',pause:'暂停',resume:'继续',clear:'清空',
     logEmpty:'等待日志输出...',logCleared:'日志已清空',
     refresh:'刷新',
@@ -371,13 +423,16 @@ function applyLang(){
   else if(txt.textContent==='Stopped'||txt.textContent==='已停止')txt.textContent=tr('statusStopped');
   else txt.textContent=tr('statusCheck');
   // update detail module labels
-  for(var mi=0;mi<modulesLabelList.length;mi++)modulesLabelList[mi].l=tr(modulesLabelList[mi].k==='post'?'dPosts':modulesLabelList[mi].k==='comment'?'dComments':modulesLabelList[mi].k==='join'?'dJoins':'dUp');
+  for(var mi=0;mi<modulesLabelList.length;mi++){
+    var k=modulesLabelList[mi].k;
+    modulesLabelList[mi].l=tr(k==='post'?'dPosts':k==='comment'?'dComments':k==='join'?'dJoins':k==='up'?'dUp':'dUpResource');
+  }
 }
 function setLang(l){lang=l;localStorage.setItem('hl',l);applyLang()}
 
 // ===== Core =====
 var families=[],selectedFid='',autoRefresh=true,refreshInterval=3000,refreshTimer=null,logPaused=false,lastLogCount=0,firstLoad=true;
-var modulesLabelList=[{k:'post',l:'Posts'},{k:'comment',l:'Comments'},{k:'join',l:'Joins'},{k:'up',l:'UP'}];
+var modulesLabelList=[{k:'post',l:'Posts'},{k:'comment',l:'Comments'},{k:'join',l:'Joins'},{k:'up',l:'UP'},{k:'up_resource',l:'UP Resource'}];
 
 function fmtStat(t,a,r){return(t||0)+'/'+(a||0)+'/'+(r||0)}
 function fmtRate(a,t){return t<=0?'--':Math.round(a*100/t)+'%'}
@@ -445,6 +500,8 @@ async function loadStatus(){
   document.getElementById('statDelay').textContent=c.request_delay_ms||'-';
   document.getElementById('statInterval').textContent=c.check_interval_seconds||'-';
   document.getElementById('statRegex').textContent=c.enable_regex?tr('statusRunning'):'off';
+  document.getElementById('statMaxCoin').textContent=c.max_up_resource_coin>=0?c.max_up_resource_coin:'∞';
+  document.getElementById('statUpResource').textContent=c.up_resource_enabled?tr('running'):'off';
   var bc=c.bad_words_count||0,rc2=c.regex_patterns_count||0;
   document.getElementById('statBadWords').textContent=bc+' / '+rc2;
   document.getElementById('statBadWordsEnabled').textContent=c.bad_words_enabled?tr('statusRunning'):'off';
@@ -461,7 +518,7 @@ async function loadFamilies(){
   families=d;
   var tbody=document.getElementById('familyTbody'),online=0;
   if(!d.length){
-    tbody.innerHTML='<tr><td colspan="8" class="table-empty">'+(lang==='zh'?'未配置家族':'No families configured')+'</td></tr>';
+    tbody.innerHTML='<tr><td colspan="9" class="table-empty">'+(lang==='zh'?'未配置家族':'No families configured')+'</td></tr>';
     document.getElementById('tblOnline').textContent='0';document.getElementById('tblTotal').textContent='0';return;
   }
   var html='';
@@ -471,8 +528,9 @@ async function loadFamilies(){
     var sc=st.comment||{total:0,approved:0,rejected:0};
     var sj=st.join||{total:0,approved:0,rejected:0};
     var su=st.up||{total:0,approved:0,rejected:0};
-    var tt=sp.total+sc.total+sj.total+su.total;
-    var ta=sp.approved+sc.approved+sj.approved+su.approved;
+    var sur=st.up_resource||{total:0,approved:0,rejected:0};
+    var tt=sp.total+sc.total+sj.total+su.total+sur.total;
+    var ta=sp.approved+sc.approved+sj.approved+su.approved+sur.approved;
     var rv=tt>0?Math.round(ta*100/tt):-1;
     if(!p)online++;
     var sel=f.family_id===selectedFid?' selected':'';
@@ -483,6 +541,7 @@ async function loadFamilies(){
     html+='<td class="col-stat">'+addStatCol('comment',sc)+'</td>';
     html+='<td class="col-stat">'+addStatCol('join',sj)+'</td>';
     html+='<td class="col-stat">'+addStatCol('up',su)+'</td>';
+    html+='<td class="col-stat">'+addStatCol('up_resource',sur)+'</td>';
     html+='<td class="col-rate"><span class="'+(rv>=0?rc(rv):'')+'">'+fmtRate(ta,tt)+'</span></td>';
     html+='<td class="col-status">'+(p?'<span class="status-tag paused">'+tr('paused')+'</span>':'<span class="status-tag running">'+tr('running')+'</span>')+'</td></tr>';
   }
@@ -510,6 +569,7 @@ function updateDetail(fid){
       var sc=st.comment||{total:0,approved:0,rejected:0};
       var sj=st.join||{total:0,approved:0,rejected:0};
       var su=st.up||{total:0,approved:0,rejected:0};
+      var sur=st.up_resource||{total:0,approved:0,rejected:0};
       document.getElementById('detailEmpty').style.display='none';
       document.getElementById('detailContent').style.display='block';
       document.getElementById('detailFid').textContent=f.family_id||'--';
@@ -527,6 +587,8 @@ function updateDetail(fid){
       document.getElementById('dJoinRate').textContent=fmtRate(sj.approved,sj.total);
       document.getElementById('dUpTotal').textContent=fmtStat(su.total,su.approved,su.rejected);
       document.getElementById('dUpRate').textContent=fmtRate(su.approved,su.total);
+      document.getElementById('dUpResourceTotal').textContent=fmtStat(sur.total,sur.approved,sur.rejected);
+      document.getElementById('dUpResourceRate').textContent=fmtRate(sur.approved,sur.total);
       return;
     }
   }

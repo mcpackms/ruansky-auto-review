@@ -19,7 +19,9 @@ struct FamilyConfig {
     bool enable_comment = false;
     bool enable_join = false;
     bool enable_up = false;
+    bool enable_up_resource = false;
     int min_level = -1;
+    int max_up_resource_coin = -1;  // -1 表示使用全局配置
 };
 
 struct TokenConfig {
@@ -39,6 +41,7 @@ struct ModuleConfig {
     std::string state3_pending;
     std::string state3_approved;
     std::string state3_rejected;
+    bool use_status3 = false;  // true 时用 status3 参数名代替 state3
 };
 
 struct Config {
@@ -54,11 +57,13 @@ struct Config {
     ModuleConfig comment;
     ModuleConfig join;
     ModuleConfig up;
+    ModuleConfig up_resource;
     std::string page;
     std::string limit;
     int check_interval_seconds = 300;
     int request_delay_ms = 100;
     int concurrency = 2;
+    int max_up_resource_coin = -1;  // UP资源最大允许金币, -1 不限制
     std::string user_agent;
     bool enable_regex = false;
     bool tui_enabled = true;

@@ -127,6 +127,7 @@ static void build_cfg_fields() {
     g_cfg_fields.push_back({CfgField::NUMBER, "检查间隔(秒)", "CHECK_INTERVAL_SECONDS", -1, 1, 3600});
     g_cfg_fields.push_back({CfgField::NUMBER, "请求延迟(毫秒)", "REQUEST_DELAY_MS", -1, 0, 10000});
     g_cfg_fields.push_back({CfgField::NUMBER, "并发数", "CONCURRENCY", -1, 1, 100});
+    g_cfg_fields.push_back({CfgField::NUMBER, "UP资源最大金币", "MAX_UP_RESOURCE_COIN", -1, -1, 999});
 
     // 每个 Token 的设置
     auto tokens_arr = toml::find_or(g_edit_toml, "TOKENS", toml::array());
@@ -309,6 +310,7 @@ static void draw_family_table(int y0, int h, int cols) {
     mvwprintw(stdscr, hdr_y, cx,    "%s", pad_right("评", w_st).c_str()); cx += w_st;
     mvwprintw(stdscr, hdr_y, cx,    "%s", pad_right("入", w_st).c_str()); cx += w_st;
     mvwprintw(stdscr, hdr_y, cx,    "%s", pad_right("UP", w_st).c_str()); cx += w_st;
+    mvwprintw(stdscr, hdr_y, cx,    "%s", pad_right("资", w_st).c_str()); cx += w_st;
     mvwprintw(stdscr, hdr_y, cx,    "状态");
     wattroff(stdscr, A_BOLD);
 
@@ -336,6 +338,7 @@ static void draw_family_table(int y0, int h, int cols) {
         mvwprintw(stdscr, row, cx, "%s", pad_right(fmt_stat(st.comment_total, st.comment_approved, st.comment_rejected), w_st).c_str()); cx += w_st;
         mvwprintw(stdscr, row, cx, "%s", pad_right(fmt_stat(st.join_total, st.join_approved, st.join_rejected), w_st).c_str()); cx += w_st;
         mvwprintw(stdscr, row, cx, "%s", pad_right(fmt_stat(st.up_total, st.up_approved, st.up_rejected), w_st).c_str()); cx += w_st;
+        mvwprintw(stdscr, row, cx, "%s", pad_right(fmt_stat(st.up_resource_total, st.up_resource_approved, st.up_resource_rejected), w_st).c_str()); cx += w_st;
 
         bool paused = info.control && info.control->paused.load();
         if (paused) {
@@ -388,7 +391,7 @@ static void draw_detail(int y0, int h, int cols) {
 
     if (h >= 3) {
         int y = y0 + 2;
-        int qw = cols / 4;
+        int qw = std::max(1, cols / 5);
         auto draw_mod = [&](int col, const std::string& name, int t, int a, int r) {
             std::string s = name + " " + fmt_stat(t, a, r);
             std::string rate = fmt_rate(a, t);
@@ -403,6 +406,7 @@ static void draw_detail(int y0, int h, int cols) {
         draw_mod(qw, "评", st.comment_total, st.comment_approved, st.comment_rejected);
         draw_mod(qw*2, "入", st.join_total, st.join_approved, st.join_rejected);
         draw_mod(qw*3, "UP", st.up_total, st.up_approved, st.up_rejected);
+        draw_mod(qw*4, "资", st.up_resource_total, st.up_resource_approved, st.up_resource_rejected);
     }
 
     // 最后活动
@@ -414,12 +418,21 @@ static void draw_detail(int y0, int h, int cols) {
             snprintf(buf, sizeof(buf), "%02d:%02d:%02d", lt->tm_hour, lt->tm_min, lt->tm_sec);
             last_str = buf;
         }
-        mvwprintw(stdscr, y0 + 3, 2, "模块: %s%s%s%s  最后活动: %s",
+        mvwprintw(stdscr, y0 + 3, 2, "模块: %s%s%s%s%s  最后活动: %s",
                   info.post_enabled ? "帖 " : "",
                   info.comment_enabled ? "评 " : "",
                   info.join_enabled ? "入 " : "",
-                  info.up_enabled ? "UP" : "",
+                  info.up_enabled ? "UP " : "",
+                  info.up_resource_enabled ? "资" : "",
                   last_str.c_str());
+    }
+
+    // 第5行: UP资源最大金币
+    if (h >= 5 && info.up_resource_enabled) {
+        std::string coin_str = info.max_up_resource_coin >= 0
+            ? std::to_string(info.max_up_resource_coin)
+            : "∞";
+        mvwprintw(stdscr, y0 + 4, 2, "UP资源最大金币: %s", coin_str.c_str());
     }
 }
 

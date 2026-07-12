@@ -101,7 +101,9 @@ struct TuiFamilyInfo {
     bool comment_enabled = false;
     bool join_enabled = false;
     bool up_enabled = false;
+    bool up_resource_enabled = false;
     int min_level = -1;
+    int max_up_resource_coin = -1;
     std::shared_ptr<FamilyControl> control;
 };
 
@@ -113,6 +115,7 @@ struct TuiFamilyStats {
     int comment_total = 0, comment_approved = 0, comment_rejected = 0;
     int join_total = 0, join_approved = 0, join_rejected = 0;
     int up_total = 0, up_approved = 0, up_rejected = 0;
+    int up_resource_total = 0, up_resource_approved = 0, up_resource_rejected = 0;
 };
 
 // main.cc 设置此回调供 TUI 读取最新统计

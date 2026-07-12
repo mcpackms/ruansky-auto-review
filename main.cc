@@ -403,12 +403,21 @@ public:
     void add_up_approved(const std::string& fid, int32_t d) { get_up_stats(fid).approved += d; }
     void add_up_rejected(const std::string& fid, int32_t d) { get_up_stats(fid).rejected += d; }
 
+    ReviewStats& get_up_resource_stats(const std::string& fid) {
+        std::lock_guard<std::mutex> lk(mtx_);
+        return up_resource_stats_[fid];
+    }
+    void add_up_resource_total(const std::string& fid, int32_t d) { get_up_resource_stats(fid).total += d; }
+    void add_up_resource_approved(const std::string& fid, int32_t d) { get_up_resource_stats(fid).approved += d; }
+    void add_up_resource_rejected(const std::string& fid, int32_t d) { get_up_resource_stats(fid).rejected += d; }
+
 private:
     std::mutex mtx_;
     std::unordered_map<std::string, ReviewStats> post_stats_;
     std::unordered_map<std::string, ReviewStats> comment_stats_;
     std::unordered_map<std::string, ReviewStats> join_stats_;
     std::unordered_map<std::string, ReviewStats> up_stats_;
+    std::unordered_map<std::string, ReviewStats> up_resource_stats_;
 };
 
 struct PendingItem {
@@ -417,6 +426,7 @@ struct PendingItem {
     std::string full_text;
     std::string token;
     std::string uid;
+    std::string di;  // UP资源详情用的 di 参数
 };
 
 // ==================== RAII 封装 OpenSSL 对象 ====================
@@ -770,7 +780,7 @@ static size_t write_cb(void* p, size_t s, size_t n, void* u) {
     params["api_level"] = g_config.api_level;
     params["phone_model"] = g_config.phone_model;
     params["token"] = token;
-    params["state3"] = mod.state3_pending;
+    params[mod.use_status3 ? "status3" : "state3"] = mod.state3_pending;
     params["uid"] = uid;
     params["$*$page"] = g_config.page;
     params["$*$limit"] = g_config.limit;
@@ -834,8 +844,16 @@ static size_t write_cb(void* p, size_t s, size_t n, void* u) {
                 break;
             }
         }
+        // UP资源需要提取 di 字段
+        std::string di;
+        if (mod.use_status3) {
+            if (item.contains("di") && item["di"].is_string()) {
+                di = item["di"].get<std::string>();
+            }
+        }
+
         items.emplace_back(std::make_unique<PendingItem>(
-            PendingItem{id, fam.family_id, full_text, token, uid}));
+            PendingItem{id, fam.family_id, full_text, token, uid, di}));
     }
     return items;
 }
@@ -906,6 +924,198 @@ static size_t write_cb(void* p, size_t s, size_t n, void* u) {
         }
     }
     return 0;
+}
+
+// ==================== UP资源详情 ====================
+// GET /up/detail 获取UP资源的详细信息
+// 签名公式: MD5("P.8CGq@Wr~Vs]!4!&api_level=...&channel=...&di=...&phone_model=...&sid=...&version=...")
+[[nodiscard]] static nlohmann::json get_up_resource_detail(
+    const std::string& sid, const std::string& di,
+    const std::string& token, const std::string& uid,
+    CurlHandle& ch) {
+    std::unordered_map<std::string, std::string> params;
+    params["channel"] = g_config.channel;
+    params["version"] = g_config.version;
+    params["api_level"] = g_config.api_level;
+    params["phone_model"] = g_config.phone_model;
+    params["sid"] = sid;
+    params["di"] = di;
+    // 以下参数在 URL 中但不参与签名
+    params["$*$os_info"] = g_config.os_info;
+    params["$*$uid"] = uid;
+    params["$*$token"] = token;
+    params["$*$isCheck"] = "1";
+    params["key"] = generate_sign(params, false);
+
+    auto resp = nlohmann::json::parse(send_get("/up/detail", params, ch));
+
+    // 检查外层 code
+    if (resp.contains("code")) {
+        int c = resp["code"].is_number() ? resp["code"].get<int>()
+            : (resp["code"].is_string() ? safe_stoi(resp["code"].get<std::string>()) : -1);
+        if (c != 0) return {};
+    }
+
+    // 解密 data
+    std::string d = resp.value("data", "");
+    if (d.empty()) return {};
+    auto result = nlohmann::json::parse(decrypt_aes(d));
+    return result;
+}
+
+// ==================== UP资源操作提交 ====================
+// POST /family/up/check/operate
+// 签名公式: MD5("P.8CGq@Wr~Vs]!4!&api_level=...&channel=...&family_id=...&isShow3=1&phone_model=...&status3=...&token=...&uid=...&upId=...&version=...")
+[[nodiscard]] static bool operate_up_resource(const ModuleConfig& mod, const std::string& upId,
+    const std::string& family_id, const std::string& token, const std::string& uid,
+    const std::string& status3, const std::string& msg3, CurlHandle& ch) {
+    // 签名参数
+    std::unordered_map<std::string, std::string> sign_params;
+    sign_params["uid"] = uid;
+    sign_params["api_level"] = g_config.api_level;
+    sign_params["family_id"] = family_id;
+    sign_params["channel"] = g_config.channel;
+    sign_params["version"] = g_config.version;
+    sign_params["phone_model"] = g_config.phone_model;
+    sign_params["token"] = token;
+    sign_params["isShow3"] = "1";
+    sign_params["status3"] = status3;
+    sign_params["upId"] = upId;
+    std::string key = generate_sign(sign_params, false);
+
+    // 构造 body（注意末尾 & 是正常的）
+    std::string body =
+        "upId=" + upId +
+        "&msg3=" + url_encode(msg3) +
+        "&api_level=" + g_config.api_level +
+        "&family_id=" + family_id +
+        "&isShow3=1" +
+        "&channel=" + g_config.channel +
+        "&version=" + g_config.version +
+        "&status3=" + status3 +
+        "&phone_model=" + url_encode(g_config.phone_model) +
+        "&token=" + token +
+        "&uid=" + uid +
+        "&os_info=" + url_encode(g_config.os_info) +
+        "&showmsg3=" +
+        "&key=" + key + "&";
+
+    auto resp = nlohmann::json::parse(send_post(mod.operate_endpoint, body, ch));
+    bool ok = false;
+
+    // 检查加密的 data 字段
+    if (resp.contains("data") && resp["data"].is_string() && !resp["data"].get<std::string>().empty()) {
+        try {
+            auto inner = nlohmann::json::parse(decrypt_aes(resp["data"].get<std::string>()));
+            if (inner.contains("code")) {
+                int c = inner["code"].is_number() ? inner["code"].get<int>()
+                    : (inner["code"].is_string() ? safe_stoi(inner["code"].get<std::string>()) : -1);
+                if (c == 0 || c == 200) ok = true;
+            }
+        } catch (...) {}
+    }
+
+    // 检查外层的 code
+    if (!ok && resp.contains("code")) {
+        int c = resp["code"].is_number() ? resp["code"].get<int>()
+            : (resp["code"].is_string() ? safe_stoi(resp["code"].get<std::string>()) : -1);
+        if (c == 0 || c == 200) ok = true;
+    }
+    return ok;
+}
+
+// ==================== UP资源审核处理 ====================
+static void process_up_resource_items(const ModuleConfig& mod, TokenReviewer* rev,
+    std::vector<std::unique_ptr<PendingItem>>& items,
+    int concurrency, int delay_ms, int max_coin = -1) {
+    if (items.empty()) return;
+    if (concurrency <= 0) concurrency = 5;
+    if (concurrency > static_cast<int>(items.size())) concurrency = items.size();
+
+    SafeQueue<PendingItem*> queue;
+    std::vector<std::thread> threads(concurrency);
+    std::atomic<int32_t> approved{0}, rejected{0}, failed{0};
+
+    for (int i = 0; i < concurrency; ++i) {
+        threads[i] = std::thread([&, mod]() {
+            CurlHandlePtr ch = acquire_curl();
+            PendingItem* item = nullptr;
+
+            while (queue.pop(item) && g_running) {
+                try {
+                    // 1. 获取详情
+                    auto detail = get_up_resource_detail(item->id, item->di, item->token, item->uid, *ch);
+                    if (detail.empty() || !detail.contains("data")) {
+                        g_log.error("[%s] %s 家族%s\tUP资源 ID=%s 获取详情失败",
+                            now_str().c_str(), mask_token(item->token).c_str(),
+                            item->family_id.c_str(), item->id.c_str());
+                        failed++;
+                        if (delay_ms > 0)
+                            std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+                        continue;
+                    }
+
+                    auto& data = detail["data"];
+                    int need_coin = 0;
+                    if (data.contains("needCoin") && data["needCoin"].is_number()) {
+                        need_coin = data["needCoin"].get<int>();
+                    }
+
+                    bool should_approve = true;
+                    std::string reason;
+
+                    // 2. 检查 needCoin
+                    if (max_coin >= 0 && need_coin > max_coin) {
+                        should_approve = false;
+                        reason = "needCoin=" + std::to_string(need_coin) + " > 最大允许=" + std::to_string(max_coin);
+                    }
+
+                    // 3. 提交审核结果
+                    bool sent = false;
+                    if (should_approve) {
+                        sent = operate_up_resource(mod, item->id, item->family_id,
+                            item->token, item->uid,
+                            mod.state3_approved, "", *ch);
+                        log_action(item->token, item->family_id, "UP资源",
+                            item->id, sent ? "通过" : "通过失败");
+                        if (sent) approved++;
+                    } else {
+                        sent = operate_up_resource(mod, item->id, item->family_id,
+                            item->token, item->uid,
+                            mod.state3_rejected, "金币过多", *ch);
+                        log_action(item->token, item->family_id, "UP资源",
+                            item->id, sent ? "拒绝" : "拒绝失败", reason);
+                        if (sent) rejected++;
+                    }
+
+                    if (!sent) failed++;
+                } catch (const std::exception& e) {
+                    g_log.error("[%s] %s 家族%s\tUP资源 ID=%s 异常: %s",
+                        now_str().c_str(), mask_token(item->token).c_str(),
+                        item->family_id.c_str(), item->id.c_str(), e.what());
+                    failed++;
+                }
+                if (delay_ms > 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+                }
+            }
+        });
+    }
+
+    for (auto& item : items) {
+        if (g_running) queue.push(item.get());
+    }
+    queue.finish();
+    for (auto& t : threads) t.join();
+
+    rev->add_up_resource_total(items[0]->family_id, items.size());
+    rev->add_up_resource_approved(items[0]->family_id, approved);
+    rev->add_up_resource_rejected(items[0]->family_id, rejected);
+    if (failed > 0) {
+        g_log.error("[%s] %s 家族%s UP资源操作失败数: %d",
+            now_str().c_str(), mask_token(items[0]->token).c_str(),
+            items[0]->family_id.c_str(), failed.load());
+    }
 }
 
 [[nodiscard]] static std::vector<nlohmann::json> get_join_applications(const ModuleConfig& mod,
@@ -1054,12 +1264,14 @@ struct ItemTask {
 
 static void process_items(const ModuleConfig& mod, TokenReviewer* rev,
     std::vector<std::unique_ptr<PendingItem>>& items, bool is_comment,
-    int concurrency, int delay_ms, bool ereg, bool ebad) {
+    int concurrency, int delay_ms, bool ereg, bool ebad,
+    const char* stats_type = nullptr) {
     if (items.empty()) return;
     if (concurrency <= 0) concurrency = 5;
     if (concurrency > static_cast<int>(items.size())) concurrency = items.size();
 
     std::string type_label = is_comment ? "评论" : "帖子";
+    if (stats_type) type_label = stats_type;
 
     std::vector<ItemTask> tasks;
     tasks.reserve(items.size());
@@ -1091,8 +1303,15 @@ static void process_items(const ModuleConfig& mod, TokenReviewer* rev,
                         log_action(task->item->token, task->item->family_id, type_label,
                             task->item->id, sent ? "拒绝" : "拒绝失败", task->reason);
                         if (sent) {
-                            if (is_comment) rev->add_comment_rejected(task->item->family_id, 1);
-                            else rev->add_post_rejected(task->item->family_id, 1);
+                            if (stats_type) {
+                                if (strcmp(stats_type, "UP资源") == 0) {
+                                    rev->add_up_resource_rejected(task->item->family_id, 1);
+                                }
+                            } else if (is_comment) {
+                                rev->add_comment_rejected(task->item->family_id, 1);
+                            } else {
+                                rev->add_post_rejected(task->item->family_id, 1);
+                            }
                         }
                     } else {
                         sent = approve_item(mod, task->item->id, task->item->family_id,
@@ -1101,8 +1320,15 @@ static void process_items(const ModuleConfig& mod, TokenReviewer* rev,
                         log_action(task->item->token, task->item->family_id, type_label,
                             task->item->id, sent ? "通过" : "通过失败");
                         if (sent) {
-                            if (is_comment) rev->add_comment_approved(task->item->family_id, 1);
-                            else rev->add_post_approved(task->item->family_id, 1);
+                            if (stats_type) {
+                                if (strcmp(stats_type, "UP资源") == 0) {
+                                    rev->add_up_resource_approved(task->item->family_id, 1);
+                                }
+                            } else if (is_comment) {
+                                rev->add_comment_approved(task->item->family_id, 1);
+                            } else {
+                                rev->add_post_approved(task->item->family_id, 1);
+                            }
                         }
                     }
                 } catch (const std::exception& e) {
@@ -1124,8 +1350,15 @@ static void process_items(const ModuleConfig& mod, TokenReviewer* rev,
     queue.finish();
     for (auto& t : threads) t.join();
 
-    if (is_comment) rev->add_comment_total(items[0]->family_id, items.size());
-    else rev->add_post_total(items[0]->family_id, items.size());
+    if (stats_type) {
+        if (strcmp(stats_type, "UP资源") == 0) {
+            rev->add_up_resource_total(items[0]->family_id, items.size());
+        }
+    } else if (is_comment) {
+        rev->add_comment_total(items[0]->family_id, items.size());
+    } else {
+        rev->add_post_total(items[0]->family_id, items.size());
+    }
 }
 
 static void process_up_items(const ModuleConfig& mod, TokenReviewer* rev,
@@ -1370,6 +1603,27 @@ static void family_loop(TokenReviewer* rev, const FamilyConfig& fam) {
             }
         }
 
+        if (g_config.up_resource.enabled && fam.enable_up_resource) {
+            try {
+                auto items = get_pending_items(g_config.up_resource, false, fam, rev->token, rev->uid, *ch);
+                if (!items.empty()) {
+                    work = true;
+                    g_log.info("[%s] %s 家族%s\t📋 UP资源: %zu",
+                        now_str().c_str(), masked_token.c_str(), fam.family_id.c_str(), items.size());
+                    int fam_max_coin = (fam.max_up_resource_coin >= 0)
+                        ? fam.max_up_resource_coin
+                        : g_config.max_up_resource_coin;
+                    process_up_resource_items(g_config.up_resource, rev, items, concurrency, delay_ms, fam_max_coin);
+                    if (delay_ms > 0) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+                    }
+                }
+            } catch (const std::exception& e) {
+                g_log.error("[%s] %s 家族%s\t❌ UP资源: %s",
+                    now_str().c_str(), masked_token.c_str(), fam.family_id.c_str(), e.what());
+            }
+        }
+
         ch.reset();  // 归还句柄到池
 
         // 一次运行模式: 执行一次即退出
@@ -1412,6 +1666,7 @@ static void load_config(const std::string& path = "settings.toml") {
     g_config.check_interval_seconds = toml::find<int>(data, "CHECK_INTERVAL_SECONDS");
     g_config.request_delay_ms = toml::find<int>(data, "REQUEST_DELAY_MS");
     g_config.concurrency = toml::find<int>(data, "CONCURRENCY");
+    g_config.max_up_resource_coin = toml::find<int>(data, "MAX_UP_RESOURCE_COIN");
     g_config.user_agent = toml::find<std::string>(data, "USER_AGENT");
     if (data.contains("ENABLE_REGEX")) {
         g_config.enable_regex = toml::find<bool>(data, "ENABLE_REGEX");
@@ -1448,6 +1703,8 @@ static void load_config(const std::string& path = "settings.toml") {
     load_mod("COMMENT", g_config.comment);
     load_mod("JOIN", g_config.join);
     load_mod("UP", g_config.up);
+    load_mod("UP_RESOURCE", g_config.up_resource);
+    g_config.up_resource.use_status3 = true;
 
     for (auto& tok : toml::find(data, "TOKENS").as_array()) {
         TokenConfig tc;
@@ -1473,6 +1730,8 @@ static void load_config(const std::string& path = "settings.toml") {
             fc.enable_comment = toml::find<bool>(fam, "ENABLE_COMMENT");
             fc.enable_join = toml::find<bool>(fam, "ENABLE_JOIN");
             fc.enable_up = toml::find<bool>(fam, "ENABLE_UP");
+            fc.enable_up_resource = toml::find<bool>(fam, "ENABLE_UP_RESOURCE");
+            fc.max_up_resource_coin = toml::find<int>(fam, "MAX_UP_RESOURCE_COIN");
             fc.min_level = toml::find<int>(fam, "MIN_LEVEL");
             tc.families.push_back(fc);
         }
@@ -1587,17 +1846,19 @@ int main(int argc, char* argv[]) {
         sigaction(SIGTERM, &sa, nullptr);
 #endif
 
-        g_log.info("\n并发:%d\t延迟:%dms\t间隔:%ds\t正则:%s\t主题:%s",
+        g_log.info("\n并发:%d\t延迟:%dms\t间隔:%ds\t正则:%s\tUP资源最大金币:%d\t主题:%s",
             g_config.concurrency, g_config.request_delay_ms,
             g_config.check_interval_seconds, g_config.enable_regex ? "开" : "关",
+            g_config.max_up_resource_coin,
             g_theme == Theme::TOKYO_NIGHT ? "tokyo-night" :
             g_theme == Theme::DARK ? "dark" : "light");
         for (auto& r : reviewers) {
             g_log.info("  %s\tUID:%s", mask_token(r->token).c_str(), r->uid.c_str());
             for (auto& f : r->families) {
-                g_log.info("    家族%s\t帖:%d\t评:%d\t入:%d\tUP:%d\t最低等级:%d",
+                int fcoin = f.max_up_resource_coin >= 0 ? f.max_up_resource_coin : g_config.max_up_resource_coin;
+                g_log.info("    家族%s\t帖:%d\t评:%d\t入:%d\tUP:%d\tUP资源:%d\t最大金币:%d\t最低等级:%d",
                     f.family_id.c_str(), f.enable_post, f.enable_comment,
-                    f.enable_join, f.enable_up, f.min_level);
+                    f.enable_join, f.enable_up, f.enable_up_resource, fcoin, f.min_level);
             }
         }
 
@@ -1641,6 +1902,10 @@ int main(int argc, char* argv[]) {
                 info.comment_enabled = f.enable_comment && g_config.comment.enabled;
                 info.join_enabled = f.enable_join && g_config.join.enabled;
                 info.up_enabled = f.enable_up && g_config.up.enabled;
+                info.up_resource_enabled = f.enable_up_resource && g_config.up_resource.enabled;
+                info.max_up_resource_coin = f.max_up_resource_coin >= 0
+                    ? f.max_up_resource_coin
+                    : g_config.max_up_resource_coin;
                 info.min_level = f.min_level;
                 info.control = g_family_controls[f.family_id];
                 g_family_list.push_back(std::move(info));
@@ -1669,6 +1934,10 @@ int main(int argc, char* argv[]) {
                         s.up_total = us.total.load();
                         s.up_approved = us.approved.load();
                         s.up_rejected = us.rejected.load();
+                        auto& urs = r->get_up_resource_stats(fid);
+                        s.up_resource_total = urs.total.load();
+                        s.up_resource_approved = urs.approved.load();
+                        s.up_resource_rejected = urs.rejected.load();
                         return s;
                     }
                 }

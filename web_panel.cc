@@ -110,6 +110,8 @@ void run_web_server(int port, const std::string& static_dir, const std::string& 
         j["config"]["comment_enabled"] = g_config.comment.enabled;
         j["config"]["join_enabled"] = g_config.join.enabled;
         j["config"]["up_enabled"] = g_config.up.enabled;
+        j["config"]["up_resource_enabled"] = g_config.up_resource.enabled;
+        j["config"]["max_up_resource_coin"] = g_config.max_up_resource_coin;
 
         // 家族统计
         int online = 0;
@@ -134,11 +136,13 @@ void run_web_server(int port, const std::string& static_dir, const std::string& 
             f["paused"] = info.control ? info.control->paused.load() : false;
             f["last_activity"] = info.control ? static_cast<int>(info.control->last_activity.load()) : 0;
             f["min_level"] = info.min_level;
+            f["max_up_resource_coin"] = info.max_up_resource_coin;
 
             f["modules"]["post"] = info.post_enabled;
             f["modules"]["comment"] = info.comment_enabled;
             f["modules"]["join"] = info.join_enabled;
             f["modules"]["up"] = info.up_enabled;
+            f["modules"]["up_resource"] = info.up_resource_enabled;
 
             auto st = g_get_family_stats ? g_get_family_stats(info.family_id) : TuiFamilyStats();
 
@@ -149,10 +153,11 @@ void run_web_server(int port, const std::string& static_dir, const std::string& 
                 f["stats"][name]["rate"] = calc_rate(approved, total);
             };
 
-            add_module("post",    st.post_total,    st.post_approved,    st.post_rejected);
-            add_module("comment", st.comment_total, st.comment_approved, st.comment_rejected);
-            add_module("join",    st.join_total,    st.join_approved,    st.join_rejected);
-            add_module("up",      st.up_total,      st.up_approved,      st.up_rejected);
+            add_module("post",        st.post_total,        st.post_approved,        st.post_rejected);
+            add_module("comment",     st.comment_total,     st.comment_approved,     st.comment_rejected);
+            add_module("join",        st.join_total,        st.join_approved,        st.join_rejected);
+            add_module("up",          st.up_total,          st.up_approved,          st.up_rejected);
+            add_module("up_resource", st.up_resource_total, st.up_resource_approved, st.up_resource_rejected);
 
             arr.push_back(f);
         }
@@ -174,10 +179,12 @@ void run_web_server(int port, const std::string& static_dir, const std::string& 
                 result["pending_count"] = info.control ? info.control->pending_count.load() : 0;
                 result["last_activity"] = info.control ? static_cast<int>(info.control->last_activity.load()) : 0;
                 result["min_level"] = info.min_level;
+                result["max_up_resource_coin"] = info.max_up_resource_coin;
                 result["modules"]["post"] = info.post_enabled;
                 result["modules"]["comment"] = info.comment_enabled;
                 result["modules"]["join"] = info.join_enabled;
                 result["modules"]["up"] = info.up_enabled;
+                result["modules"]["up_resource"] = info.up_resource_enabled;
 
                 auto st = g_get_family_stats ? g_get_family_stats(info.family_id) : TuiFamilyStats();
                 auto add_module = [&](const std::string& name, int total, int approved, int rejected) {
@@ -186,10 +193,11 @@ void run_web_server(int port, const std::string& static_dir, const std::string& 
                     result["stats"][name]["rejected"] = rejected;
                     result["stats"][name]["rate"] = calc_rate(approved, total);
                 };
-                add_module("post",    st.post_total,    st.post_approved,    st.post_rejected);
-                add_module("comment", st.comment_total, st.comment_approved, st.comment_rejected);
-                add_module("join",    st.join_total,    st.join_approved,    st.join_rejected);
-                add_module("up",      st.up_total,      st.up_approved,      st.up_rejected);
+                add_module("post",        st.post_total,        st.post_approved,        st.post_rejected);
+                add_module("comment",     st.comment_total,     st.comment_approved,     st.comment_rejected);
+                add_module("join",        st.join_total,        st.join_approved,        st.join_rejected);
+                add_module("up",          st.up_total,          st.up_approved,          st.up_rejected);
+                add_module("up_resource", st.up_resource_total, st.up_resource_approved, st.up_resource_rejected);
 
                 res.set_content(result.dump(), "application/json");
                 return;
