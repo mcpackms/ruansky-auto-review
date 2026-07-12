@@ -78,7 +78,8 @@ static std::string fmt_rate(int approved, int total) {
 
 static std::string t_now() {
     time_t t = time(nullptr);
-    struct tm* lt = localtime(&t);
+    struct tm lt_buf;
+    struct tm* lt = localtime_r(&t, &lt_buf);
     char buf[9];
     snprintf(buf, sizeof(buf), "%02d:%02d:%02d", lt->tm_hour, lt->tm_min, lt->tm_sec);
     return buf;
@@ -413,7 +414,8 @@ static void draw_detail(int y0, int h, int cols) {
     if (h >= 4) {
         std::string last_str = "从未";
         if (last > 0) {
-            struct tm* lt = localtime(&last);
+            struct tm lt_buf2;
+            struct tm* lt = localtime_r(&last, &lt_buf2);
             char buf[9];
             snprintf(buf, sizeof(buf), "%02d:%02d:%02d", lt->tm_hour, lt->tm_min, lt->tm_sec);
             last_str = buf;

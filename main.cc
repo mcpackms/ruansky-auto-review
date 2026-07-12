@@ -508,8 +508,9 @@ static CurlHandlePtr acquire_curl() {
 // ==================== 工具函数 ====================
 [[nodiscard]] static std::string now_str() {
     time_t t = time(nullptr);
+    struct tm tm_buf;
     char buf[20];
-    strftime(buf, sizeof(buf), "%H:%M:%S", localtime(&t));
+    strftime(buf, sizeof(buf), "%H:%M:%S", localtime_r(&t, &tm_buf));
     return buf;
 }
 
