@@ -735,6 +735,10 @@ static size_t write_cb(void* p, size_t s, size_t n, void* u) {
     std::string url = build_url(ep, params);
     std::string resp;
     resp.reserve(4096);
+    // 清除可能残留的 POST 选项
+    curl_easy_setopt(ch.easy, CURLOPT_HTTPHEADER, NULL);
+    curl_easy_setopt(ch.easy, CURLOPT_POSTFIELDS, NULL);
+    curl_easy_setopt(ch.easy, CURLOPT_POSTFIELDSIZE, 0L);
     curl_easy_setopt(ch.easy, CURLOPT_URL, url.c_str());
     curl_easy_setopt(ch.easy, CURLOPT_HTTPGET, 1L);
     curl_easy_setopt(ch.easy, CURLOPT_WRITEFUNCTION, write_cb);
@@ -753,6 +757,10 @@ static size_t write_cb(void* p, size_t s, size_t n, void* u) {
     url += ep;
     std::string resp;
     resp.reserve(4096);
+    // 清除可能残留的 GET 选项
+    curl_easy_setopt(ch.easy, CURLOPT_HTTPHEADER, NULL);
+    curl_easy_setopt(ch.easy, CURLOPT_POSTFIELDS, NULL);
+    curl_easy_setopt(ch.easy, CURLOPT_POSTFIELDSIZE, 0L);
     struct curl_slist* headers = nullptr;
     headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded; charset=UTF-8");
     curl_easy_setopt(ch.easy, CURLOPT_URL, url.c_str());
