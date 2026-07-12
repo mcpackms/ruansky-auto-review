@@ -38,9 +38,8 @@ sudo pacman -Sy --needed \
 ## Compile
 
 ``` bash  
-mkdir build && cd build
-cmake ..
-make -j4
+cmake -B build -G Ninja
+ninja -C build -j4
 ```
 
 ## Run  
