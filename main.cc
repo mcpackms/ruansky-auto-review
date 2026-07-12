@@ -794,6 +794,16 @@ static size_t write_cb(void* p, size_t s, size_t n, void* u) {
         std::string d = resp.value("data", ""), iv = resp.value("iv", "");
         if (d.empty() || iv.empty()) return {};
         dec = decrypt_aes(d, iv);
+    } else if (mod.use_status3) {
+        // UP资源: 响应无 validation, 直接取 data 解密
+        if (resp.contains("code")) {
+            int c = resp["code"].is_number() ? resp["code"].get<int>()
+                : (resp["code"].is_string() ? safe_stoi(resp["code"].get<std::string>()) : -1);
+            if (c != 0) return {};
+        }
+        std::string d = resp.value("data", "");
+        if (d.empty()) return {};
+        dec = decrypt_aes(d);
     } else {
         if (!resp.value("validation", false)) return {};
         std::string d = resp.value("data", "");
@@ -802,7 +812,7 @@ static size_t write_cb(void* p, size_t s, size_t n, void* u) {
     }
 
     auto result = nlohmann::json::parse(dec);
-    if (is_comment && result.contains("code")) {
+    if (!mod.use_status3 && is_comment && result.contains("code")) {
         int c = result["code"].is_number() ? result["code"].get<int>()
             : (result["code"].is_string() ? safe_stoi(result["code"].get<std::string>()) : -1);
         if (c != 0) return {};
