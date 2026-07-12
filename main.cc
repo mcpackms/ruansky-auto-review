@@ -785,7 +785,7 @@ static size_t write_cb(void* p, size_t s, size_t n, void* u) {
     params["$*$page"] = g_config.page;
     params["$*$limit"] = g_config.limit;
     params["$*$os_info"] = g_config.os_info;
-    if (!is_comment) params["mid"] = fam.mid;
+    if (!is_comment && !mod.use_status3) params["mid"] = fam.mid;
     params["key"] = generate_sign(params, false);
 
     auto resp = nlohmann::json::parse(send_get(mod.list_endpoint, params, ch));
