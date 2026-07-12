@@ -1137,7 +1137,7 @@ static void log_action(const std::string& token, const std::string& family,
     sign_params["isShow3"] = "1";
     sign_params["status3"] = status3;
     sign_params["upId"] = upId;
-    std::string key = generate_sign(sign_params, false);
+    std::string key = generate_sign(sign_params, true);
 
     // 构造 body（注意末尾 & 是正常的）
     std::string body =
@@ -1211,6 +1211,10 @@ static void process_up_resource_items(const ModuleConfig& mod, TokenReviewer* re
                         continue;
                     }
 
+                    g_log.info("[%s] DBG UP资源 ID=%s 获取详情成功, data type=%s",
+                        now_str().c_str(), item->id.c_str(),
+                        detail["data"].type_name());
+
                     auto& data = detail["data"];
                     int need_coin = 0;
                     if (data.contains("needCoin") && data["needCoin"].is_number()) {
@@ -1227,6 +1231,9 @@ static void process_up_resource_items(const ModuleConfig& mod, TokenReviewer* re
                     }
 
                     // 3. 提交审核结果
+                    g_log.info("[%s] DBG UP资源 ID=%s 准备操作 should_approve=%d",
+                        now_str().c_str(), item->id.c_str(), should_approve);
+
                     bool sent = false;
                     if (should_approve) {
                         sent = operate_up_resource(mod, item->id, item->family_id,
@@ -1245,6 +1252,8 @@ static void process_up_resource_items(const ModuleConfig& mod, TokenReviewer* re
                     }
 
                     if (!sent) failed++;
+                    g_log.info("[%s] DBG UP资源 ID=%s 完成 sent=%d",
+                        now_str().c_str(), item->id.c_str(), sent);
                 } catch (const std::exception& e) {
                     g_log.error("[%s] %s 家族%s\tUP资源 ID=%s 异常: %s",
                         now_str().c_str(), mask_token(item->token).c_str(),
