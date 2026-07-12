@@ -926,6 +926,142 @@ static size_t write_cb(void* p, size_t s, size_t n, void* u) {
     return 0;
 }
 
+[[nodiscard]] static std::vector<nlohmann::json> get_join_applications(const ModuleConfig& mod,
+    const FamilyConfig& fam, const std::string& token, const std::string& uid, CurlHandle& ch) {
+    std::unordered_map<std::string, std::string> params;
+    params["family_id"] = fam.family_id;
+    params["channel"] = g_config.channel;
+    params["version"] = g_config.version;
+    params["api_level"] = g_config.api_level;
+    params["phone_model"] = g_config.phone_model;
+    params["token"] = token;
+    params["uid"] = uid;
+    params["$*$page"] = g_config.page;
+    params["$*$limit"] = g_config.limit;
+    params["$*$os_info"] = g_config.os_info;
+    params["$*$status"] = mod.state3_pending;
+    params["key"] = generate_sign(params, false);
+
+    auto resp = nlohmann::json::parse(send_get(mod.list_endpoint, params, ch));
+    std::string d = resp.value("data", "");
+    if (d.empty()) return {};
+    auto result = nlohmann::json::parse(decrypt_aes(d));
+    if (result.contains("code")) {
+        int c = result["code"].is_number() ? result["code"].get<int>()
+            : (result["code"].is_string() ? safe_stoi(result["code"].get<std::string>()) : -1);
+        if (c != 0) return {};
+    }
+    if (!result.contains("data") || !result["data"].is_array()) return {};
+    std::vector<nlohmann::json> items;
+    items.reserve(result["data"].size());
+    for (auto& item : result["data"]) {
+        items.push_back(item);
+    }
+    return items;
+}
+
+[[nodiscard]] static bool operate_join(const ModuleConfig& mod, const nlohmann::json& item,
+    const FamilyConfig& fam, const std::string& token, const std::string& uid, CurlHandle& ch) {
+    std::string id;
+    if (item.contains("id")) {
+        if (item["id"].is_string()) id = item["id"].get<std::string>();
+        else if (item["id"].is_number_integer()) id = std::to_string(item["id"].get<int64_t>());
+        else id = item["id"].dump();
+    } else return false;
+
+    int level = extract_level(item);
+    std::string status = mod.state3_approved;
+    std::string msg;
+    if (fam.min_level != -1 && level < fam.min_level) {
+        status = mod.state3_rejected;
+        msg = "等级不够";
+    }
+
+    std::unordered_map<std::string, std::string> sign_params;
+    sign_params["uid"] = uid;
+    sign_params["api_level"] = g_config.api_level;
+    sign_params["family_id"] = fam.family_id;
+    sign_params["channel"] = g_config.channel;
+    sign_params["id"] = id;
+    sign_params["version"] = g_config.version;
+    sign_params["phone_model"] = g_config.phone_model;
+    sign_params["token"] = token;
+    sign_params["status"] = status;
+    std::string key = generate_sign(sign_params, false);
+
+    std::string body = "msg=" + msg +
+        "&uid=" + uid +
+        "&api_level=" + g_config.api_level +
+        "&family_id=" + fam.family_id +
+        "&os_info=" + g_config.os_info +
+        "&channel=" + g_config.channel +
+        "&id=" + id +
+        "&version=" + g_config.version +
+        "&key=" + key +
+        "&phone_model=" + g_config.phone_model +
+        "&token=" + token +
+        "&status=" + status + "&";
+
+    auto resp = nlohmann::json::parse(send_post(mod.operate_endpoint, body, ch));
+    bool ok = false;
+    if (resp.contains("data") && resp["data"].is_string() && !resp["data"].get<std::string>().empty()) {
+        try {
+            auto inner = nlohmann::json::parse(decrypt_aes(resp["data"].get<std::string>()));
+            if (inner.contains("code") && inner["code"] == 0) ok = true;
+        } catch (...) {}
+    }
+    if (!ok && resp.contains("code")) {
+        int c = resp["code"].is_number() ? resp["code"].get<int>()
+            : (resp["code"].is_string() ? safe_stoi(resp["code"].get<std::string>()) : -1);
+        if (c == 0) ok = true;
+    }
+    return ok;
+}
+
+// ==================== 并发队列 ====================
+template<typename T>
+class SafeQueue {
+    std::deque<T> queue_;
+    mutable std::mutex mtx_;
+    std::condition_variable cv_;
+    bool done_ = false;
+public:
+    void push(T item) {
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            queue_.push_back(std::move(item));
+        }
+        cv_.notify_one();
+    }
+
+    bool pop(T& item) {
+        std::unique_lock<std::mutex> lk(mtx_);
+        cv_.wait(lk, [this] { return !queue_.empty() || done_; });
+        if (queue_.empty()) return false;
+        item = std::move(queue_.front());
+        queue_.pop_front();
+        return true;
+    }
+
+    void finish() {
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            done_ = true;
+        }
+        cv_.notify_all();
+    }
+};
+
+// ==================== 日志记录 ====================
+static void log_action(const std::string& token, const std::string& family,
+    const std::string& type, const std::string& id,
+    const std::string& action, const std::string& detail = "") {
+    g_log.info("[%s] %s 家族%s\t%s ID=%s -> %s%s",
+        now_str().c_str(), mask_token(token).c_str(), family.c_str(),
+        type.c_str(), id.c_str(), action.c_str(),
+        detail.empty() ? "" : (" | " + escape_log(detail)).c_str());
+}
+
 // ==================== UP资源详情 ====================
 // GET /up/detail 获取UP资源的详细信息
 // 签名公式: MD5("P.8CGq@Wr~Vs]!4!&api_level=...&channel=...&di=...&phone_model=...&sid=...&version=...")
@@ -1116,142 +1252,6 @@ static void process_up_resource_items(const ModuleConfig& mod, TokenReviewer* re
             now_str().c_str(), mask_token(items[0]->token).c_str(),
             items[0]->family_id.c_str(), failed.load());
     }
-}
-
-[[nodiscard]] static std::vector<nlohmann::json> get_join_applications(const ModuleConfig& mod,
-    const FamilyConfig& fam, const std::string& token, const std::string& uid, CurlHandle& ch) {
-    std::unordered_map<std::string, std::string> params;
-    params["family_id"] = fam.family_id;
-    params["channel"] = g_config.channel;
-    params["version"] = g_config.version;
-    params["api_level"] = g_config.api_level;
-    params["phone_model"] = g_config.phone_model;
-    params["token"] = token;
-    params["uid"] = uid;
-    params["$*$page"] = g_config.page;
-    params["$*$limit"] = g_config.limit;
-    params["$*$os_info"] = g_config.os_info;
-    params["$*$status"] = mod.state3_pending;
-    params["key"] = generate_sign(params, false);
-
-    auto resp = nlohmann::json::parse(send_get(mod.list_endpoint, params, ch));
-    std::string d = resp.value("data", "");
-    if (d.empty()) return {};
-    auto result = nlohmann::json::parse(decrypt_aes(d));
-    if (result.contains("code")) {
-        int c = result["code"].is_number() ? result["code"].get<int>()
-            : (result["code"].is_string() ? safe_stoi(result["code"].get<std::string>()) : -1);
-        if (c != 0) return {};
-    }
-    if (!result.contains("data") || !result["data"].is_array()) return {};
-    std::vector<nlohmann::json> items;
-    items.reserve(result["data"].size());
-    for (auto& item : result["data"]) {
-        items.push_back(item);
-    }
-    return items;
-}
-
-[[nodiscard]] static bool operate_join(const ModuleConfig& mod, const nlohmann::json& item,
-    const FamilyConfig& fam, const std::string& token, const std::string& uid, CurlHandle& ch) {
-    std::string id;
-    if (item.contains("id")) {
-        if (item["id"].is_string()) id = item["id"].get<std::string>();
-        else if (item["id"].is_number_integer()) id = std::to_string(item["id"].get<int64_t>());
-        else id = item["id"].dump();
-    } else return false;
-
-    int level = extract_level(item);
-    std::string status = mod.state3_approved;
-    std::string msg;
-    if (fam.min_level != -1 && level < fam.min_level) {
-        status = mod.state3_rejected;
-        msg = "等级不够";
-    }
-
-    std::unordered_map<std::string, std::string> sign_params;
-    sign_params["uid"] = uid;
-    sign_params["api_level"] = g_config.api_level;
-    sign_params["family_id"] = fam.family_id;
-    sign_params["channel"] = g_config.channel;
-    sign_params["id"] = id;
-    sign_params["version"] = g_config.version;
-    sign_params["phone_model"] = g_config.phone_model;
-    sign_params["token"] = token;
-    sign_params["status"] = status;
-    std::string key = generate_sign(sign_params, false);
-
-    std::string body = "msg=" + msg +
-        "&uid=" + uid +
-        "&api_level=" + g_config.api_level +
-        "&family_id=" + fam.family_id +
-        "&os_info=" + g_config.os_info +
-        "&channel=" + g_config.channel +
-        "&id=" + id +
-        "&version=" + g_config.version +
-        "&key=" + key +
-        "&phone_model=" + g_config.phone_model +
-        "&token=" + token +
-        "&status=" + status + "&";
-
-    auto resp = nlohmann::json::parse(send_post(mod.operate_endpoint, body, ch));
-    bool ok = false;
-    if (resp.contains("data") && resp["data"].is_string() && !resp["data"].get<std::string>().empty()) {
-        try {
-            auto inner = nlohmann::json::parse(decrypt_aes(resp["data"].get<std::string>()));
-            if (inner.contains("code") && inner["code"] == 0) ok = true;
-        } catch (...) {}
-    }
-    if (!ok && resp.contains("code")) {
-        int c = resp["code"].is_number() ? resp["code"].get<int>()
-            : (resp["code"].is_string() ? safe_stoi(resp["code"].get<std::string>()) : -1);
-        if (c == 0) ok = true;
-    }
-    return ok;
-}
-
-// ==================== 并发队列 ====================
-template<typename T>
-class SafeQueue {
-    std::deque<T> queue_;
-    mutable std::mutex mtx_;
-    std::condition_variable cv_;
-    bool done_ = false;
-public:
-    void push(T item) {
-        {
-            std::lock_guard<std::mutex> lk(mtx_);
-            queue_.push_back(std::move(item));
-        }
-        cv_.notify_one();
-    }
-
-    bool pop(T& item) {
-        std::unique_lock<std::mutex> lk(mtx_);
-        cv_.wait(lk, [this] { return !queue_.empty() || done_; });
-        if (queue_.empty()) return false;
-        item = std::move(queue_.front());
-        queue_.pop_front();
-        return true;
-    }
-
-    void finish() {
-        {
-            std::lock_guard<std::mutex> lk(mtx_);
-            done_ = true;
-        }
-        cv_.notify_all();
-    }
-};
-
-// ==================== 日志记录 ====================
-static void log_action(const std::string& token, const std::string& family,
-    const std::string& type, const std::string& id,
-    const std::string& action, const std::string& detail = "") {
-    g_log.info("[%s] %s 家族%s\t%s ID=%s -> %s%s",
-        now_str().c_str(), mask_token(token).c_str(), family.c_str(),
-        type.c_str(), id.c_str(), action.c_str(),
-        detail.empty() ? "" : (" | " + escape_log(detail)).c_str());
 }
 
 // ==================== 并发处理 ====================
