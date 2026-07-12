@@ -1191,7 +1191,8 @@ static void log_action(const std::string& token, const std::string& family,
 // ==================== UP资源审核处理 ====================
 static void process_up_resource_items(const ModuleConfig& mod, TokenReviewer* rev,
     std::vector<std::unique_ptr<PendingItem>>& items,
-    int concurrency, int delay_ms, int max_coin = -1) {
+    int concurrency, int delay_ms, int max_coin = -1,
+    bool ereg = false, bool ebad = true) {
     if (items.empty()) return;
     if (concurrency <= 0) concurrency = 5;
     if (concurrency > static_cast<int>(items.size())) concurrency = items.size();
@@ -1220,21 +1221,43 @@ static void process_up_resource_items(const ModuleConfig& mod, TokenReviewer* re
                     }
 
                     auto& data = detail["data"];
-                    int need_coin = 0;
-                    if (data.contains("needCoin") && data["needCoin"].is_number()) {
-                        need_coin = data["needCoin"].get<int>();
+
+                    // 2. 提取文字做敏感词检查
+                    std::string up_text;
+                    std::vector<std::string> text_fields = {"title", "content", "body", "description", "desc"};
+                    for (auto& f : text_fields) {
+                        if (data.contains(f) && data[f].is_string()) {
+                            std::string v = data[f].get<std::string>();
+                            if (!v.empty()) {
+                                if (!up_text.empty()) up_text += "\n";
+                                up_text += v;
+                            }
+                        }
                     }
 
                     bool should_approve = true;
                     std::string reason;
 
-                    // 2. 检查 needCoin
-                    if (max_coin >= 0 && need_coin > max_coin) {
+                    if (!up_text.empty()) {
+                        TextChecker checker(up_text);
+                        auto cr = check_text(checker, ereg, ebad);
+                        if (cr.should_reject) {
+                            should_approve = false;
+                            reason = cr.reason;
+                        }
+                    }
+
+                    // 3. 检查 needCoin
+                    int need_coin = 0;
+                    if (data.contains("needCoin") && data["needCoin"].is_number()) {
+                        need_coin = data["needCoin"].get<int>();
+                    }
+                    if (should_approve && max_coin >= 0 && need_coin > max_coin) {
                         should_approve = false;
                         reason = "needCoin=" + std::to_string(need_coin) + " > 最大允许=" + std::to_string(max_coin);
                     }
 
-                    // 3. 提交审核结果
+                    // 4. 提交审核结果
                     bool sent = false;
                     if (should_approve) {
                         sent = operate_up_resource(mod, item->id, item->family_id,
@@ -1246,7 +1269,7 @@ static void process_up_resource_items(const ModuleConfig& mod, TokenReviewer* re
                     } else {
                         sent = operate_up_resource(mod, item->id, item->family_id,
                             item->token, item->uid,
-                            mod.state3_rejected, "金币过多", *ch);
+                            mod.state3_rejected, reason, *ch);
                         log_action(item->token, item->family_id, "UP资源",
                             item->id, sent ? "拒绝" : "拒绝失败", reason);
                         if (sent) rejected++;
@@ -1641,7 +1664,7 @@ static void family_loop(TokenReviewer* rev, const FamilyConfig& fam) {
                     int fam_max_coin = (fam.max_up_resource_coin >= 0)
                         ? fam.max_up_resource_coin
                         : g_config.max_up_resource_coin;
-                    process_up_resource_items(g_config.up_resource, rev, items, concurrency, delay_ms, fam_max_coin);
+                    process_up_resource_items(g_config.up_resource, rev, items, concurrency, delay_ms, fam_max_coin, ereg, ebad);
                     if (delay_ms > 0) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
                     }
