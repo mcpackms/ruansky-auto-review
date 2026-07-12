@@ -795,15 +795,24 @@ static size_t write_cb(void* p, size_t s, size_t n, void* u) {
         if (d.empty() || iv.empty()) return {};
         dec = decrypt_aes(d, iv);
     } else if (mod.use_status3) {
-        // UP资源: 响应无 validation, 直接取 data 解密
+        // UP资源: 响应可能有 code, data 可能是加密字符串或直接 JSON 数组
         if (resp.contains("code")) {
             int c = resp["code"].is_number() ? resp["code"].get<int>()
                 : (resp["code"].is_string() ? safe_stoi(resp["code"].get<std::string>()) : -1);
             if (c != 0) return {};
         }
-        std::string d = resp.value("data", "");
-        if (d.empty()) return {};
-        dec = decrypt_aes(d);
+        if (resp.contains("data") && resp["data"].is_string()) {
+            std::string d = resp["data"].get<std::string>();
+            if (d.empty()) return {};
+            dec = decrypt_aes(d);
+        } else if (resp.contains("data") && resp["data"].is_array()) {
+            // data 已是明文数组，直接包装成解密后的格式
+            nlohmann::json wrapper;
+            wrapper["data"] = resp["data"];
+            dec = wrapper.dump();
+        } else {
+            return {};
+        }
     } else {
         if (!resp.value("validation", false)) return {};
         std::string d = resp.value("data", "");
