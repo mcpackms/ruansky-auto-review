@@ -342,6 +342,7 @@ h1,h2,h3,h4{font-weight:500;letter-spacing:-0.02em;color:#111}
           <span><span data-i="token">Token</span>: <span id="detailToken">-</span></span>
           <span>UID: <span id="detailUid">-</span></span>
           <span id="detailLastActivity"><span data-i="last">Last</span>: --</span>
+          <span><span data-i="dUpResourceCoin">UP Res Max Coin</span>: <span id="detailUpResCoin">-</span></span>
         </div>
       </div>
       <div class="detail-modules" id="detailModules"></div>
@@ -380,7 +381,7 @@ var I18N={
     loading:'Loading...',
     selectHint:'Select a family to inspect',
     family:'Family',token:'Token',last:'Last',
-    dPosts:'Posts',dComments:'Comments',dJoins:'Joins',dUp:'UP',dUpResource:'UP Resource',
+    dPosts:'Posts',dComments:'Comments',dJoins:'Joins',dUp:'UP',dUpResource:'UP Resource',dUpResourceCoin:'UP Max Coin',
     logTitle:'Log',pause:'Pause',resume:'Resume',clear:'Clear',
     logEmpty:'Awaiting log output...',logCleared:'Log cleared',
     refresh:'Refresh',
@@ -396,7 +397,7 @@ var I18N={
     loading:'加载中...',
     selectHint:'选择一个家族查看详情',
     family:'家族',token:'令牌',last:'最近活动',
-    dPosts:'帖子',dComments:'评论',dJoins:'加入',dUp:'UP',dUpResource:'UP资源',
+    dPosts:'帖子',dComments:'评论',dJoins:'加入',dUp:'UP',dUpResource:'UP资源',dUpResourceCoin:'UP最大金币',
     logTitle:'日志',pause:'暂停',resume:'继续',clear:'清空',
     logEmpty:'等待日志输出...',logCleared:'日志已清空',
     refresh:'刷新',
@@ -589,6 +590,7 @@ function updateDetail(fid){
       document.getElementById('dUpRate').textContent=fmtRate(su.approved,su.total);
       document.getElementById('dUpResourceTotal').textContent=fmtStat(sur.total,sur.approved,sur.rejected);
       document.getElementById('dUpResourceRate').textContent=fmtRate(sur.approved,sur.total);
+      document.getElementById('detailUpResCoin').textContent=f.max_up_resource_coin>=0?f.max_up_resource_coin:'∞';
       return;
     }
   }
