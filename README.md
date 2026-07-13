@@ -5,6 +5,7 @@
 sudo apt update
 sudo apt install -y \
     build-essential cmake pkg-config \
+    ninja
     libncursesw5-dev \
     libcurl4-openssl-dev \
     libssl-dev \
@@ -17,6 +18,7 @@ sudo apt install -y \
 sudo dnf groupinstall -y "Development Tools"
 sudo dnf install -y \
     cmake pkgconf-pkg-config \
+    ninja \
     ncurses-devel \
     libcurl-devel \
     openssl-devel \
@@ -29,6 +31,7 @@ sudo dnf install -y toml11-devel
 sudo pacman -Sy --needed \
     base-devel cmake pkgconf \
     ncurses \
+    ninja \
     curl \
     openssl \
     pcre2 \
