@@ -29,11 +29,22 @@ jobs:
             libssl-dev \
             libpcre2-dev \
             nlohmann-json3-dev \
-            libtoml11-dev
+            libtoml11-dev \
+            ninja-build
+      - name: Build quickjs-ng
+        run: |
+          git clone --depth 1 --branch v0.15.1 https://github.com/quickjs-ng/quickjs-ng.git /tmp/quickjs-ng
+          cd /tmp/quickjs-ng
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja \
+            -DBUILD_SHARED_LIBS=ON \
+            -DCMAKE_INSTALL_PREFIX=/usr/local
+          ninja -C build -j$(nproc)
+          sudo ninja -C build install
+          sudo ldconfig
       - name: Build
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build -j$(nproc)
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja
+          ninja -C build -j$(nproc)
       - name: Package
         run: tar czf auto_review-linux-x86_64.tar.gz -C build auto_review
       - uses: actions/upload-artifact@v4
@@ -56,11 +67,22 @@ jobs:
             libssl-dev \
             libpcre2-dev \
             nlohmann-json3-dev \
-            libtoml11-dev
+            libtoml11-dev \
+            ninja-build
+      - name: Build quickjs-ng
+        run: |
+          git clone --depth 1 --branch v0.15.1 https://github.com/quickjs-ng/quickjs-ng.git /tmp/quickjs-ng
+          cd /tmp/quickjs-ng
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja \
+            -DBUILD_SHARED_LIBS=ON \
+            -DCMAKE_INSTALL_PREFIX=/usr/local
+          ninja -C build -j$(nproc)
+          sudo ninja -C build install
+          sudo ldconfig
       - name: Build
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build -j$(nproc)
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja
+          ninja -C build -j$(nproc)
       - name: Package
         run: tar czf auto_review-linux-arm64.tar.gz -C build auto_review
       - uses: actions/upload-artifact@v4
@@ -74,14 +96,23 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: |
-          brew install cmake pkg-config ncurses curl openssl pcre2 nlohmann-json toml11
+          brew install cmake pkg-config ncurses curl openssl pcre2 nlohmann-json toml11 ninja
+      - name: Build quickjs-ng
+        run: |
+          git clone --depth 1 --branch v0.15.1 https://github.com/quickjs-ng/quickjs-ng.git /tmp/quickjs-ng
+          cd /tmp/quickjs-ng
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja \
+            -DBUILD_SHARED_LIBS=ON \
+            -DCMAKE_INSTALL_PREFIX=/usr/local
+          ninja -C build -j$(sysctl -n hw.ncpu)
+          sudo ninja -C build install
       - name: Build
         run: |
           export PKG_CONFIG_PATH="$(brew --prefix openssl)/lib/pkgconfig:$(brew --prefix curl)/lib/pkgconfig:$(brew --prefix ncurses)/lib/pkgconfig:$PKG_CONFIG_PATH"
           export LDFLAGS="-L$(brew --prefix ncurses)/lib"
           export CPPFLAGS="-I$(brew --prefix ncurses)/include"
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build -j$(sysctl -n hw.ncpu)
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja
+          ninja -C build -j$(sysctl -n hw.ncpu)
       - name: Package
         run: tar czf auto_review-macos-arm64.tar.gz -C build auto_review
       - uses: actions/upload-artifact@v4
