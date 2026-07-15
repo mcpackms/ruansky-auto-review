@@ -8,8 +8,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # ==================== 查找依赖 ====================
 find_package(PkgConfig REQUIRED)
 
-# QuickJS (JS 插件引擎)
-find_package(qjs REQUIRED)
+# Node.js (JS 插件引擎通过子进程)
+# 无需额外依赖，运行时需要 node 可执行文件
 
 # ncurses (with wide char support for Chinese)
 pkg_check_modules(NCURSES REQUIRED ncursesw)
@@ -49,18 +49,12 @@ set(SOURCES
     tui.cc
     web_panel.cc
     plugins/plugin_manager.cc
-    plugins/js_bridge.cc
-    plugins/js_sandbox.cc
-    plugins/quickjs_helpers.cc
 )
 
 set(HEADERS
     tui.h
     web_panel.h
     plugins/plugin_manager.h
-    plugins/js_bridge.h
-    plugins/js_sandbox.h
-    plugins/quickjs_helpers.h
 )
 
 # ==================== 可执行文件 ====================
@@ -72,7 +66,6 @@ target_include_directories(auto_review PRIVATE
     ${NCURSES_INCLUDE_DIRS}
     ${PCRE2_INCLUDE_DIRS}
     ${NLOHMANN_JSON_INCLUDE_DIRS}
-    ${CMAKE_CURRENT_SOURCE_DIR}/plugins
 )
 
 if(TOML11_INCLUDE_DIR)
@@ -85,7 +78,6 @@ target_link_libraries(auto_review PRIVATE
     ${OPENSSL_CRYPTO_LIBRARY}
     ${PCRE2_LIBRARIES}
     pthread
-    qjs
 )
 
 # ==================== 编译选项 ====================

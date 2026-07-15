@@ -1,25 +1,25 @@
-// plugin_manager.h - Plugin manager for JS plugin system
+// plugin_manager.h - Plugin manager for Node.js plugin system
 #pragma once
 
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
-#include <functional>
 
-#include <quickjs.h>
 #include <toml.hpp>
 #include <nlohmann/json.hpp>
 
-#include "quickjs_helpers.h"
+// ==================== Check result type ====================
+struct JsCheckResult {
+    bool should_reject = false;
+    std::string reason;
+};
 
 // ==================== Plugin configuration ====================
 struct PluginLoadConfig {
     std::string name;
-    std::string file;          // .js file path (relative to plugins dirs)
-    std::string inline_code;   // inline JS code (alternative to file)
+    std::string file;          // .js file path
     bool enabled = true;
-    bool allow_exec = false;   // allow exec() API
     nlohmann::json config;     // custom config for the plugin
 };
 
@@ -28,30 +28,16 @@ struct PluginInstance {
     std::string name;
     std::string file;
     bool enabled = true;
-    bool allow_exec = false;
 
-    // QuickJS runtime and context (isolated per plugin)
-    JSRuntime* rt = nullptr;
-    JSContext* ctx = nullptr;
+    // Node.js child process
+    pid_t pid = -1;
+    int stdin_fd = -1;   // write to node stdin
+    int stdout_fd = -1;  // read from node stdout
 
-    // Module.exports reference
-    JSValue module_exports = JS_UNDEFINED;
-
-    // Cached hook function references
-    JSValue on_before_check = JS_UNDEFINED;
-    JSValue on_after_check = JS_UNDEFINED;
-    JSValue on_item_approved = JS_UNDEFINED;
-    JSValue on_item_rejected = JS_UNDEFINED;
-    JSValue on_review_round_start = JS_UNDEFINED;
-    JSValue on_review_round_end = JS_UNDEFINED;
-    JSValue on_error = JS_UNDEFINED;
-    JSValue on_pause = JS_UNDEFINED;
-    JSValue on_resume = JS_UNDEFINED;
-
-    // Custom config (from settings.toml [PLUGINS.LOAD.config])
+    // Custom config
     nlohmann::json config;
 
-    // KV store reference
+    // KV store (loaded from/saved to disk)
     nlohmann::json store;
 };
 
@@ -62,15 +48,6 @@ public:
     ~PluginManager();
 
     // Load plugins from TOML config
-    // Expected format:
-    //   [PLUGINS]
-    //   dirs = ["./plugins"]
-    //   [[PLUGINS.LOAD]]
-    //   name = "my_plugin"
-    //   file = "my_plugin.js"
-    //   enabled = true
-    //   [PLUGINS.LOAD.config]
-    //   key = "value"
     bool load_from_config(const toml::value& plugins_config);
 
     // Load a single plugin
@@ -79,17 +56,12 @@ public:
     // Unload all plugins
     void unload_all();
 
-    // Get number of loaded plugins
     size_t count() const { return plugins_.size(); }
-
-    // Check if any plugins are loaded
     bool empty() const { return plugins_.empty(); }
 
     // ==================== Hook dispatchers ====================
-    // These are called from main.cc at the appropriate points
 
-    // Text check hooks (hot path - must be fast)
-    // Returns JsCheckResult which may override the default check
+    // Text check hooks (sync - wait for node response)
     JsCheckResult dispatch_before_check(const std::string& text,
                                         const std::string& family_id,
                                         const std::string& type);
@@ -99,7 +71,7 @@ public:
                                        const std::string& family_id,
                                        const std::string& type);
 
-    // Event hooks (fire-and-forget, non-critical path)
+    // Event hooks (async - fire and forget)
     void dispatch_item_approved(const std::string& family_id,
                                 const std::string& type,
                                 const std::string& item_id);
@@ -121,27 +93,28 @@ public:
     void dispatch_resume(const std::string& family_id);
 
 private:
-    // Internal: load a JS file into a context and extract hooks
-    bool init_plugin_instance(PluginInstance* inst, const PluginLoadConfig& cfg);
+    // Spawn node process for a plugin instance
+    bool spawn_node(PluginInstance* inst);
 
-    // Internal: extract hook function reference from module.exports
-    // Stores the cached JSValue into the provided output reference
-    void extract_hook(PluginInstance* inst, const char* hook_name, JSValue& output);
+    // Send JSON command and wait for response (sync)
+    // Returns parsed JSON response or nullptr on failure
+    nlohmann::json send_command_sync(PluginInstance* inst,
+                                     const nlohmann::json& cmd,
+                                     int timeout_ms = 5000);
 
-    // Internal: safely call a JS hook function with no return value
-    void call_hook_void(PluginInstance* inst, JSValue& func,
-                        int argc, JSValueConst* argv);
+    // Send JSON command without waiting (async)
+    void send_command_async(PluginInstance* inst, const nlohmann::json& cmd);
 
-    // Internal: safely call a JS hook function that returns a JsCheckResult
-    JsCheckResult call_hook_check(PluginInstance* inst, JSValue& func,
-                                  const std::string& text,
-                                  const std::string& family_id,
-                                  const std::string& type,
-                                  const JsCheckResult* default_result = nullptr);
+    // Close pipes and kill child process
+    void close_plugin(PluginInstance* inst);
+
+    // Readline helper: read one JSON line from fd with timeout
+    std::string read_line(int fd, int timeout_ms);
 
     // All loaded plugins
     std::vector<std::unique_ptr<PluginInstance>> plugins_;
     mutable std::mutex mtx_;
+    int next_id_ = 1;
 };
 
 // Global plugin manager instance

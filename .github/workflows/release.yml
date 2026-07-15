@@ -31,16 +31,6 @@ jobs:
             nlohmann-json3-dev \
             libtoml11-dev \
             ninja-build
-      - name: Build quickjs-ng
-        run: |
-          git clone --depth 1 --branch v0.15.1 https://github.com/quickjs-ng/quickjs-ng.git /tmp/quickjs-ng
-          cd /tmp/quickjs-ng
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja \
-            -DBUILD_SHARED_LIBS=ON \
-            -DCMAKE_INSTALL_PREFIX=/usr/local
-          ninja -C build -j$(nproc)
-          sudo ninja -C build install
-          sudo ldconfig
       - name: Build
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja
@@ -69,16 +59,6 @@ jobs:
             nlohmann-json3-dev \
             libtoml11-dev \
             ninja-build
-      - name: Build quickjs-ng
-        run: |
-          git clone --depth 1 --branch v0.15.1 https://github.com/quickjs-ng/quickjs-ng.git /tmp/quickjs-ng
-          cd /tmp/quickjs-ng
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja \
-            -DBUILD_SHARED_LIBS=ON \
-            -DCMAKE_INSTALL_PREFIX=/usr/local
-          ninja -C build -j$(nproc)
-          sudo ninja -C build install
-          sudo ldconfig
       - name: Build
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja
@@ -97,15 +77,6 @@ jobs:
       - name: Install dependencies
         run: |
           brew install cmake pkg-config ncurses curl openssl pcre2 nlohmann-json toml11 ninja
-      - name: Build quickjs-ng
-        run: |
-          git clone --depth 1 --branch v0.15.1 https://github.com/quickjs-ng/quickjs-ng.git /tmp/quickjs-ng
-          cd /tmp/quickjs-ng
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja \
-            -DBUILD_SHARED_LIBS=ON \
-            -DCMAKE_INSTALL_PREFIX=/usr/local
-          ninja -C build -j$(sysctl -n hw.ncpu)
-          sudo ninja -C build install
       - name: Build
         run: |
           export PKG_CONFIG_PATH="$(brew --prefix openssl)/lib/pkgconfig:$(brew --prefix curl)/lib/pkgconfig:$(brew --prefix ncurses)/lib/pkgconfig:$PKG_CONFIG_PATH"

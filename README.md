@@ -1,6 +1,6 @@
 # ruansky_auto_review
 
-基于 QuickJS-ng 嵌入 JS 插件引擎的自动内容审核机器人。
+基于 Node.js 子进程 JS 插件引擎的自动内容审核机器人。
 
 ## 依赖
 
@@ -15,7 +15,7 @@
 - libpcre2 (正则)
 - nlohmann-json3
 - toml11
-- **quickjs-ng >= 0.15.1** (JS 插件引擎)
+- **Node.js >= 18** (JS 插件引擎，运行时依赖)
 
 ### debian
 
@@ -61,17 +61,19 @@ sudo pacman -Sy --needed \
     toml11
 ```
 
-## 编译 quickjs-ng
+## 运行时依赖
 
-quickjs-ng 未被收录在主流发行版仓库中，需要从源码编译：
+插件系统依赖 **Node.js >= 18**。大部分发行版可直接安装：
 
 ```bash
-git clone --depth 1 --branch v0.15.1 https://github.com/quickjs-ng/quickjs-ng.git
-cd quickjs-ng
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
-cmake --build build -j$(nproc)
-sudo cmake --install build
-sudo ldconfig  # Linux only
+# Debian/Ubuntu
+sudo apt install nodejs
+
+# Red Hat/Fedora
+sudo dnf install nodejs
+
+# Arch Linux
+sudo pacman -S nodejs
 ```
 
 ## 编译
