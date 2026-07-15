@@ -263,7 +263,7 @@ static void draw_header(int cols) {
     mvwhline(stdscr, 0, 0, ' ', cols);
 
     wattron(stdscr, A_BOLD);
-    mvwprintw(stdscr, 0, 2, "high_bot 自动审核 TUI  v1.5.0");
+    mvwprintw(stdscr, 0, 2, "high_bot 自动审核 TUI  v1.3.0");
     wattroff(stdscr, A_BOLD);
 
     std::string hints;

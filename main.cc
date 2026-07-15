@@ -46,6 +46,7 @@
 
 #include "tui.h"
 #include "web_panel.h"
+#include "plugins/plugin_manager.h"
 
 // ==================== 辅助函数 ====================
 [[nodiscard]] static int safe_stoi(const std::string& s, int default_val = -1) {
@@ -306,11 +307,13 @@ WordsData g_bad_words;
 RegexData g_regex_data;
 std::string g_config_path = "settings.toml";
 
-// Web 面板访问器（避免包含 DoubleArrayAC 定义）
+// Web 面板 & 插件系统访问器（避免包含 DoubleArrayAC 定义）
 int get_bad_words_count() { return static_cast<int>(g_bad_words.words.size()); }
 bool get_bad_words_enabled() { return g_bad_words.enabled; }
 int get_regex_patterns_count() { return static_cast<int>(g_regex_data.patterns.size()); }
 bool get_regex_enabled() { return g_regex_data.enabled; }
+using BadWordsList = std::vector<std::string>;
+const BadWordsList& get_bad_words_list() { return g_bad_words.words; }
 
 // ==================== 线程安全日志 ====================
 class Logger {
@@ -681,46 +684,67 @@ struct CheckResult {
 };
 
 // 一次扫描完成违禁词 + 正则检查，避免 should_reject + reject_reason 双重扫描
-[[nodiscard]] static CheckResult check_text(TextChecker& checker, bool ereg, bool ebad) {
+[[nodiscard]] static CheckResult check_text(TextChecker& checker, bool ereg, bool ebad,
+    const std::string& family_id = "", const std::string& type = "") {
     if (ereg && !g_regex_data.enabled) ereg = false;
 
     const std::string& lower = checker.to_lower();
+    std::string original = std::string(checker.original());
+
+    // 插件 before-check 钩子
+    if (!family_id.empty() && !type.empty()) {
+        JsCheckResult plugin_result = g_plugin_mgr.dispatch_before_check(
+            original, family_id, type);
+        if (plugin_result.should_reject) {
+            return CheckResult{true, plugin_result.reason};
+        }
+    }
+
+    CheckResult result;
 
     // 先查违禁词 (AC 自动机，非常快)
     if (ebad && g_bad_words.enabled && g_bad_words.ac_matcher) {
         int idx = g_bad_words.ac_matcher->search_first(lower);
         if (idx >= 0) {
-            CheckResult r;
-            r.should_reject = true;
+            result.should_reject = true;
             if (idx < static_cast<int>(g_bad_words.words.size())) {
-                r.reason = "违禁词:" + g_bad_words.words[idx];
+                result.reason = "违禁词:" + g_bad_words.words[idx];
             }
-            return r;
         }
     }
 
     // 再查正则 (PCRE2 相对较慢)
-    if (ereg) {
+    if (!result.should_reject && ereg) {
         for (auto& re : g_regex_data.patterns) {
             pcre2_match_data* md = pcre2_match_data_create_from_pattern(re.get(), nullptr);
             int rc = pcre2_match(re.get(), (PCRE2_SPTR)lower.c_str(), lower.size(), 0, 0, md, nullptr);
             if (rc >= 0) {
-                CheckResult r;
-                r.should_reject = true;
+                result.should_reject = true;
                 PCRE2_SIZE* ovec = pcre2_get_ovector_pointer(md);
                 PCRE2_SIZE start = ovec[0];
                 PCRE2_SIZE end = ovec[1];
                 std::string match;
                 if (end > start) match = lower.substr(start, end - start);
-                r.reason = "正则:" + (match.empty() ? "命中" : match);
+                result.reason = "正则:" + (match.empty() ? "命中" : match);
                 pcre2_match_data_free(md);
-                return r;
+                break;
             }
             pcre2_match_data_free(md);
         }
     }
 
-    return CheckResult{};
+    // 插件 after-check 钩子
+    if (!family_id.empty() && !type.empty()) {
+        JsCheckResult plugin_result = g_plugin_mgr.dispatch_after_check(
+            original, JsCheckResult{result.should_reject, result.reason},
+            family_id, type);
+        if (plugin_result.should_reject) {
+            result.should_reject = true;
+            result.reason = plugin_result.reason;
+        }
+    }
+
+    return result;
 }
 
 // ==================== HTTP 请求 ====================
@@ -1240,7 +1264,8 @@ static void process_up_resource_items(const ModuleConfig& mod, TokenReviewer* re
 
                     if (!up_text.empty()) {
                         TextChecker checker(up_text);
-                        auto cr = check_text(checker, ereg, ebad);
+                        auto cr = check_text(checker, ereg, ebad,
+                            item->family_id, "up_resource");
                         if (cr.should_reject) {
                             should_approve = false;
                             reason = cr.reason;
@@ -1265,18 +1290,28 @@ static void process_up_resource_items(const ModuleConfig& mod, TokenReviewer* re
                             mod.state3_approved, "", *ch);
                         log_action(item->token, item->family_id, "UP资源",
                             item->id, sent ? "通过" : "通过失败");
-                        if (sent) approved++;
+                        if (sent) {
+                            approved++;
+                            g_plugin_mgr.dispatch_item_approved(
+                                item->family_id, "up_resource", item->id);
+                        }
                     } else {
                         sent = operate_up_resource(mod, item->id, item->family_id,
                             item->token, item->uid,
                             mod.state3_rejected, reason, *ch);
                         log_action(item->token, item->family_id, "UP资源",
                             item->id, sent ? "拒绝" : "拒绝失败", reason);
-                        if (sent) rejected++;
+                        if (sent) {
+                            rejected++;
+                            g_plugin_mgr.dispatch_item_rejected(
+                                item->family_id, "up_resource", item->id, reason);
+                        }
                     }
 
                     if (!sent) failed++;
                 } catch (const std::exception& e) {
+                    g_plugin_mgr.dispatch_error(
+                        item->family_id, "up_resource", e.what());
                     g_log.error("[%s] %s 家族%s\tUP资源 ID=%s 异常: %s",
                         now_str().c_str(), mask_token(item->token).c_str(),
                         item->family_id.c_str(), item->id.c_str(), e.what());
@@ -1328,7 +1363,10 @@ static void process_items(const ModuleConfig& mod, TokenReviewer* rev,
     tasks.reserve(items.size());
     for (auto& item : items) {
         TextChecker checker(item->full_text);
-        auto cr = check_text(checker, ereg, ebad);
+        std::string type_for_check = stats_type ? std::string(stats_type) :
+            (is_comment ? "comment" : "post");
+        auto cr = check_text(checker, ereg, ebad,
+            item->family_id, type_for_check);
         if (cr.should_reject) {
             tasks.push_back({ItemTask::REJECT, item.get(), cr.reason});
         } else {
@@ -1363,6 +1401,9 @@ static void process_items(const ModuleConfig& mod, TokenReviewer* rev,
                             } else {
                                 rev->add_post_rejected(task->item->family_id, 1);
                             }
+                            g_plugin_mgr.dispatch_item_rejected(
+                                task->item->family_id, type_label,
+                                task->item->id, task->reason);
                         }
                     } else {
                         sent = approve_item(mod, task->item->id, task->item->family_id,
@@ -1380,9 +1421,13 @@ static void process_items(const ModuleConfig& mod, TokenReviewer* rev,
                             } else {
                                 rev->add_post_approved(task->item->family_id, 1);
                             }
+                            g_plugin_mgr.dispatch_item_approved(
+                                task->item->family_id, type_label,
+                                task->item->id);
                         }
                     }
                 } catch (const std::exception& e) {
+                    g_plugin_mgr.dispatch_error(task->item->family_id, type_label, e.what());
                     g_log.error("[%s] %s 家族%s\t%s ID=%s HTTP异常: %s",
                         now_str().c_str(), mask_token(task->item->token).c_str(),
                         task->item->family_id.c_str(), type_label.c_str(),
@@ -1423,7 +1468,8 @@ static void process_up_items(const ModuleConfig& mod, TokenReviewer* rev,
     tasks.reserve(items.size());
     for (auto& item : items) {
         TextChecker checker(item->full_text);
-        auto cr = check_text(checker, ereg, ebad);
+        auto cr = check_text(checker, ereg, ebad,
+            item->family_id, "up");
         if (cr.should_reject) {
             tasks.push_back({ItemTask::REJECT, item.get(), cr.reason});
         } else {
@@ -1448,16 +1494,25 @@ static void process_up_items(const ModuleConfig& mod, TokenReviewer* rev,
                             mod.state3_rejected, true, *ch);
                         log_action(task->item->token, task->item->family_id, "UP评论",
                             task->item->id, sent ? "拒绝" : "拒绝失败", task->reason);
-                        if (sent) rev->add_up_rejected(task->item->family_id, 1);
+                        if (sent) {
+                            rev->add_up_rejected(task->item->family_id, 1);
+                            g_plugin_mgr.dispatch_item_rejected(
+                                task->item->family_id, "up", task->item->id, task->reason);
+                        }
                     } else {
                         sent = approve_item(mod, task->item->id, task->item->family_id,
                             task->item->token, task->item->uid,
                             mod.state3_approved, true, *ch);
                         log_action(task->item->token, task->item->family_id, "UP评论",
                             task->item->id, sent ? "通过" : "通过失败");
-                        if (sent) rev->add_up_approved(task->item->family_id, 1);
+                        if (sent) {
+                            rev->add_up_approved(task->item->family_id, 1);
+                            g_plugin_mgr.dispatch_item_approved(
+                                task->item->family_id, "up", task->item->id);
+                        }
                     }
                 } catch (const std::exception& e) {
+                    g_plugin_mgr.dispatch_error(task->item->family_id, "up", e.what());
                     g_log.error("[%s] %s 家族%s\tUP评论 ID=%s HTTP异常: %s",
                         now_str().c_str(), mask_token(task->item->token).c_str(),
                         task->item->family_id.c_str(),
@@ -1570,11 +1625,17 @@ static void family_loop(TokenReviewer* rev, const FamilyConfig& fam) {
         now_str().c_str(), masked_token.c_str(), fam.family_id.c_str(), concurrency, delay_ms);
 
     while (g_running) {
+        g_plugin_mgr.dispatch_review_round_start(fam.family_id);
         // 暂停检查 (一次运行模式跳过)
         if (!g_once_mode) {
+            // 插件暂停/恢复通知
+            bool was_paused = control->paused.load();
             while (control->paused && g_running) {
                 control->last_activity = time(nullptr);
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+            if (was_paused && !control->paused.load()) {
+                g_plugin_mgr.dispatch_resume(fam.family_id);
             }
             if (!g_running) break;
         }
@@ -1595,6 +1656,7 @@ static void family_loop(TokenReviewer* rev, const FamilyConfig& fam) {
                     }
                 }
             } catch (const std::exception& e) {
+                g_plugin_mgr.dispatch_error(fam.family_id, "post", e.what());
                 g_log.error("[%s] %s 家族%s\t❌ 帖子: %s",
                     now_str().c_str(), masked_token.c_str(), fam.family_id.c_str(), e.what());
             }
@@ -1613,6 +1675,7 @@ static void family_loop(TokenReviewer* rev, const FamilyConfig& fam) {
                     }
                 }
             } catch (const std::exception& e) {
+                g_plugin_mgr.dispatch_error(fam.family_id, "comment", e.what());
                 g_log.error("[%s] %s 家族%s\t❌ 评论: %s",
                     now_str().c_str(), masked_token.c_str(), fam.family_id.c_str(), e.what());
             }
@@ -1631,6 +1694,7 @@ static void family_loop(TokenReviewer* rev, const FamilyConfig& fam) {
                     }
                 }
             } catch (const std::exception& e) {
+                g_plugin_mgr.dispatch_error(fam.family_id, "join", e.what());
                 g_log.error("[%s] %s 家族%s\t❌ 加入: %s",
                     now_str().c_str(), masked_token.c_str(), fam.family_id.c_str(), e.what());
             }
@@ -1649,6 +1713,7 @@ static void family_loop(TokenReviewer* rev, const FamilyConfig& fam) {
                     }
                 }
             } catch (const std::exception& e) {
+                g_plugin_mgr.dispatch_error(fam.family_id, "up", e.what());
                 g_log.error("[%s] %s 家族%s\t❌ UP评论: %s",
                     now_str().c_str(), masked_token.c_str(), fam.family_id.c_str(), e.what());
             }
@@ -1670,6 +1735,7 @@ static void family_loop(TokenReviewer* rev, const FamilyConfig& fam) {
                     }
                 }
             } catch (const std::exception& e) {
+                g_plugin_mgr.dispatch_error(fam.family_id, "up_resource", e.what());
                 g_log.error("[%s] %s 家族%s\t❌ UP资源: %s",
                     now_str().c_str(), masked_token.c_str(), fam.family_id.c_str(), e.what());
             }
@@ -1683,6 +1749,8 @@ static void family_loop(TokenReviewer* rev, const FamilyConfig& fam) {
                 now_str().c_str(), masked_token.c_str(), fam.family_id.c_str());
             break;
         }
+
+        g_plugin_mgr.dispatch_review_round_end(fam.family_id, 0, 0, 0);
 
         if (!work) {
             int total = g_config.check_interval_seconds;
@@ -1825,7 +1893,7 @@ static void load_regex_words() {
 
 // ==================== 主函数 ====================
 static void print_help(const char* prog) {
-    printf("high_bot 自动审核 v1.0.0 开源版\n\n");
+    printf("high_bot 自动审核 v1.3.0 开源版\n\n");
     printf("用法: %s [选项]\n\n", prog);
     printf("选项:\n");
     printf("  -h, --help      显示此帮助信息\n");
@@ -1865,7 +1933,7 @@ int main(int argc, char* argv[]) {
     curl_global_init(CURL_GLOBAL_ALL);
     try {
         g_start_time = static_cast<int>(time(nullptr));
-        g_log.info("high_bot自动审核 v1.0.0 开源版");
+        g_log.info("high_bot自动审核 v1.3.0 开源版");
         g_log.info("配置文件:\t%s", g_config_path.c_str());
         load_config(g_config_path);
 
@@ -1874,6 +1942,26 @@ int main(int argc, char* argv[]) {
 
         load_bad_words();
         load_regex_words();
+
+        // ===== 加载 JS 插件 =====
+        try {
+            auto plugin_data = toml::parse(g_config_path);
+            if (plugin_data.contains("PLUGINS")) {
+                bool loaded = g_plugin_mgr.load_from_config(plugin_data.at("PLUGINS"));
+                if (loaded) {
+                    g_log.info("✅ JS 插件已加载");
+                    g_log_queue.push("[INFO]\t[PLUGIN]\t已加载");
+                } else {
+                    g_log.info("⚠️  JS 插件加载失败");
+                    g_log_queue.push("[WARN]\t[PLUGIN]\t加载失败");
+                }
+            } else {
+                g_log_queue.push("[INFO]\t[PLUGIN]\t未配置插件段 [PLUGINS]");
+            }
+        } catch (const std::exception& e) {
+            g_log.error("[PLUGIN]\t解析失败:\t%s", e.what());
+            g_log_queue.push("[ERROR]\t[PLUGIN]\t解析配置失败: " + std::string(e.what()));
+        }
 
         std::vector<std::unique_ptr<TokenReviewer>> reviewers;
         reviewers.reserve(g_config.tokens.size());
