@@ -1900,179 +1900,170 @@ static void load_regex_words() {
 
 // ==================== 配置迁移工具 ====================
 // 读取旧的 settings.toml，生成规范化新配置，保留所有用户数据
-static bool migrate_config(const std::string& old_path, const std::string& new_path) {
-    namespace toml = ::toml;
-    using ordered_value = toml::basic_value<toml::ordered_type_config>;
+// 兼容 toml11 v3 和 v4 (不使用 format/ordered_type_config，不引用 toml::value 类型)
 
-    // 解析旧配置
-    ordered_value old;
-    try {
-        old = toml::parse<toml::ordered_type_config>(old_path);
-    } catch (const std::exception& e) {
-        g_log.error("配置迁移: 无法解析旧配置 %s: %s", old_path.c_str(), e.what());
-        return false;
+static std::string toml_escape(const std::string& s) {
+    std::string out;
+    out += '"';
+    for (char c : s) {
+        switch (c) {
+            case '\\': out += "\\\\"; break;
+            case '"':  out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:   out += c;
+        }
     }
+    out += '"';
+    return out;
+}
+
+static bool migrate_config(const std::string& old_path, const std::string& new_path) {
+    // 解析旧配置（auto 推导类型，兼容 v3/v4）
+    auto old = toml::parse(old_path);
 
     if (!old.is_table()) {
         g_log.error("配置迁移: 旧配置根不是表");
         return false;
     }
 
-    const auto& old_tbl = old.as_table();
-
-    // 泛型取值助手
-    auto exists = [&](const ordered_value::table_type& tbl, const std::string& key) -> bool {
-        return tbl.count(key) > 0;
-    };
-    auto get_str = [&](const ordered_value::table_type& tbl, const std::string& k, const std::string& d) -> std::string {
-        auto it = tbl.find(k);
-        return (it != tbl.end() && it->second.is_string()) ? it->second.as_string() : d;
-    };
-    auto get_int = [&](const ordered_value::table_type& tbl, const std::string& k, std::int64_t d) -> std::int64_t {
-        auto it = tbl.find(k);
-        return (it != tbl.end() && it->second.is_integer()) ? it->second.as_integer() : d;
-    };
-    auto get_bool = [&](const ordered_value::table_type& tbl, const std::string& k, bool d) -> bool {
-        auto it = tbl.find(k);
-        return (it != tbl.end() && it->second.is_boolean()) ? it->second.as_boolean() : d;
+    auto has = [&](const auto& tbl, const std::string& key) -> bool {
+        if (!tbl.is_table()) return false;
+        try { tbl.at(key); return true; } catch (...) { return false; }
     };
 
-    // 构建新配置表（有序）
-    ordered_value::table_type cfg;
+    auto get_str = [&](const auto& tbl, const std::string& key, const std::string& def) -> std::string {
+        if (!tbl.is_table()) return def;
+        try { const auto& v = tbl.at(key); return v.is_string() ? v.as_string() : def; }
+        catch (...) { return def; }
+    };
 
-    auto copy_str = [&](const std::string& k, const std::string& d) { cfg.emplace(k, get_str(old_tbl, k, d)); };
-    auto copy_int = [&](const std::string& k, std::int64_t d)   { cfg.emplace(k, get_int(old_tbl, k, d)); };
+    auto get_int = [&](const auto& tbl, const std::string& key, std::int64_t def) -> std::int64_t {
+        if (!tbl.is_table()) return def;
+        try { const auto& v = tbl.at(key); return v.is_integer() ? v.as_integer() : def; }
+        catch (...) { return def; }
+    };
+
+    auto get_bool = [&](const auto& tbl, const std::string& key, bool def) -> bool {
+        if (!tbl.is_table()) return def;
+        try { const auto& v = tbl.at(key); return v.is_boolean() ? v.as_boolean() : def; }
+        catch (...) { return def; }
+    };
+
+    std::ostringstream out;
+
+    auto write_str = [&](const std::string& k, const std::string& v) { out << k << " = " << toml_escape(v) << '\n'; };
+    auto write_int = [&](const std::string& k, std::int64_t v)       { out << k << " = " << v << '\n'; };
+    auto write_bool = [&](const std::string& k, bool v)              { out << k << " = " << (v ? "true" : "false") << '\n'; };
 
     // ===== 顶层标量 =====
-    copy_str("SIGN_CONST", "");
-    copy_str("API_LEVEL", "36");
-    copy_str("LIMIT", "50");
-    copy_str("BASE_URL", "");
-    copy_str("CHANNEL", "rtk");
-    copy_str("USER_AGENT", "");
-    copy_str("VERSION", "");
-    copy_str("PHONE_MODEL", "");
-    copy_int("REQUEST_DELAY_MS", 100);
-    copy_str("OS_INFO", "");
-    copy_str("PAGE", "1");
-    cfg.emplace("ENABLE_REGEX", get_bool(old_tbl, "ENABLE_REGEX", true));
-    copy_int("CHECK_INTERVAL_SECONDS", 300);
-    copy_int("CONCURRENCY", 2);
-    copy_int("MAX_UP_RESOURCE_COIN", -1);
-    cfg.emplace("THEME", get_str(old_tbl, "THEME", "tokyo-night"));
+    write_str("SIGN_CONST",           get_str(old, "SIGN_CONST", ""));
+    write_str("API_LEVEL",           get_str(old, "API_LEVEL", "36"));
+    write_str("LIMIT",               get_str(old, "LIMIT", "50"));
+    write_str("BASE_URL",            get_str(old, "BASE_URL", ""));
+    write_str("CHANNEL",             get_str(old, "CHANNEL", "rtk"));
+    write_str("USER_AGENT",          get_str(old, "USER_AGENT", ""));
+    write_str("VERSION",             get_str(old, "VERSION", ""));
+    write_str("PHONE_MODEL",         get_str(old, "PHONE_MODEL", ""));
+    write_int("REQUEST_DELAY_MS",    get_int(old, "REQUEST_DELAY_MS", 100));
+    write_str("OS_INFO",             get_str(old, "OS_INFO", ""));
+    write_str("PAGE",                get_str(old, "PAGE", "1"));
+    write_bool("ENABLE_REGEX",        get_bool(old, "ENABLE_REGEX", true));
+    write_int("CHECK_INTERVAL_SECONDS", get_int(old, "CHECK_INTERVAL_SECONDS", 300));
+    write_int("CONCURRENCY",         get_int(old, "CONCURRENCY", 2));
+    write_int("MAX_UP_RESOURCE_COIN", get_int(old, "MAX_UP_RESOURCE_COIN", -1));
+    write_str("THEME",               get_str(old, "THEME", "tokyo-night"));
+    out << '\n';
 
     // ===== [TUI] =====
-    {
-        ordered_value::table_type sec;
-        if (exists(old_tbl, "TUI")) {
-            const auto& s = old_tbl.at("TUI").as_table();
-            sec.emplace("ENABLED", get_bool(s, "ENABLED", true));
-        } else {
-            sec.emplace("ENABLED", true);
-        }
-        cfg.emplace("TUI", ordered_value(std::move(sec)));
-    }
+    out << "[TUI]\n";
+    write_bool("ENABLED", has(old, "TUI") ? get_bool(old.at("TUI"), "ENABLED", true) : true);
+    out << '\n';
 
     // ===== [WEB] =====
-    {
-        ordered_value::table_type sec;
-        if (exists(old_tbl, "WEB")) {
-            const auto& s = old_tbl.at("WEB").as_table();
-            sec.emplace("ENABLED", get_bool(s, "ENABLED", false));
-            sec.emplace("PORT",    get_int(s, "PORT", 2356));
-            sec.emplace("BIND",    get_str(s, "BIND", "127.0.0.1"));
-            sec.emplace("ROOT",    get_str(s, "ROOT", "./web"));
-        } else {
-            sec.emplace("ENABLED", false);
-            sec.emplace("PORT", 2356);
-            sec.emplace("BIND", "127.0.0.1");
-            sec.emplace("ROOT", "./web");
-        }
-        cfg.emplace("WEB", ordered_value(std::move(sec)));
+    out << "[WEB]\n";
+    if (has(old, "WEB")) {
+        const auto& w = old.at("WEB");
+        write_bool("ENABLED", get_bool(w, "ENABLED", false));
+        write_int("PORT",     get_int(w, "PORT", 2356));
+        write_str("BIND",     get_str(w, "BIND", "127.0.0.1"));
+        write_str("ROOT",     get_str(w, "ROOT", "./web"));
+    } else {
+        write_bool("ENABLED", false);
+        write_int("PORT",     2356);
+        write_str("BIND",     "127.0.0.1");
+        write_str("ROOT",     "./web");
     }
+    out << '\n';
 
     // ===== [[TOKENS]] =====
-    {
-        ordered_value::array_type tokens_arr;
-        if (exists(old_tbl, "TOKENS")) {
-            for (const auto& tok : old_tbl.at("TOKENS").as_array()) {
-                if (!tok.is_table()) continue;
-                const auto& tok_tbl = tok.as_table();
+    if (has(old, "TOKENS")) {
+        for (const auto& tok : old.at("TOKENS").as_array()) {
+            if (!tok.is_table()) continue;
+            out << "[[TOKENS]]\n";
+            write_str("TOKEN",            get_str(tok, "TOKEN", ""));
+            write_str("UID",              get_str(tok, "UID", ""));
+            write_bool("ENABLE_REGEX",     get_bool(tok, "ENABLE_REGEX", true));
+            write_bool("ENABLE_BADWORDS",  get_bool(tok, "ENABLE_BADWORDS", true));
+            write_int("CONCURRENCY",       get_int(tok, "CONCURRENCY", 2));
+            write_int("REQUEST_DELAY_MS",  get_int(tok, "REQUEST_DELAY_MS", 100));
 
-                ordered_value::table_type tc;
-                tc.emplace("TOKEN",            get_str(tok_tbl, "TOKEN", ""));
-                tc.emplace("UID",              get_str(tok_tbl, "UID", ""));
-                tc.emplace("ENABLE_REGEX",     get_bool(tok_tbl, "ENABLE_REGEX", true));
-                tc.emplace("ENABLE_BADWORDS",  get_bool(tok_tbl, "ENABLE_BADWORDS", true));
-                tc.emplace("CONCURRENCY",      get_int(tok_tbl, "CONCURRENCY", 2));
-                tc.emplace("REQUEST_DELAY_MS", get_int(tok_tbl, "REQUEST_DELAY_MS", 100));
+            // [[TOKENS.FAMILIES]]
+            if (has(tok, "FAMILIES")) {
+                for (const auto& fam : tok.at("FAMILIES").as_array()) {
+                    if (!fam.is_table()) continue;
+                    out << "[[TOKENS.FAMILIES]]\n";
+                    write_str("FAMILY_ID",            get_str(fam, "FAMILY_ID", ""));
+                    write_str("MID",                  get_str(fam, "MID", ""));
+                    write_bool("ENABLE_POST",          get_bool(fam, "ENABLE_POST", false));
+                    write_bool("ENABLE_COMMENT",       get_bool(fam, "ENABLE_COMMENT", false));
+                    write_bool("ENABLE_JOIN",          get_bool(fam, "ENABLE_JOIN", false));
+                    write_bool("ENABLE_UP",            get_bool(fam, "ENABLE_UP", false));
+                    write_bool("ENABLE_UP_RESOURCE",   get_bool(fam, "ENABLE_UP_RESOURCE", false));
+                    write_int("MAX_UP_RESOURCE_COIN",  get_int(fam, "MAX_UP_RESOURCE_COIN", -1));
+                    write_int("MIN_LEVEL",             get_int(fam, "MIN_LEVEL", -1));
 
-                // [[TOKENS.FAMILIES]]
-                if (exists(tok_tbl, "FAMILIES")) {
-                    ordered_value::array_type fams_arr;
-                    for (const auto& fam : tok_tbl.at("FAMILIES").as_array()) {
-                        if (!fam.is_table()) continue;
-                        const auto& fam_tbl = fam.as_table();
-
-                        ordered_value::table_type fc;
-                        fc.emplace("FAMILY_ID",             get_str(fam_tbl, "FAMILY_ID", ""));
-                        fc.emplace("MID",                   get_str(fam_tbl, "MID", ""));
-                        fc.emplace("ENABLE_POST",           get_bool(fam_tbl, "ENABLE_POST", false));
-                        fc.emplace("ENABLE_COMMENT",        get_bool(fam_tbl, "ENABLE_COMMENT", false));
-                        fc.emplace("ENABLE_JOIN",           get_bool(fam_tbl, "ENABLE_JOIN", false));
-                        fc.emplace("ENABLE_UP",             get_bool(fam_tbl, "ENABLE_UP", false));
-                        fc.emplace("ENABLE_UP_RESOURCE",    get_bool(fam_tbl, "ENABLE_UP_RESOURCE", false));
-                        fc.emplace("MAX_UP_RESOURCE_COIN",  get_int(fam_tbl, "MAX_UP_RESOURCE_COIN", -1));
-                        fc.emplace("MIN_LEVEL",             get_int(fam_tbl, "MIN_LEVEL", -1));
-
-                        // PLUGINS_DIR (optional array)
-                        if (exists(fam_tbl, "PLUGINS_DIR")) {
-                            ordered_value::array_type dirs;
-                            for (const auto& d : fam_tbl.at("PLUGINS_DIR").as_array()) {
-                                if (d.is_string()) dirs.push_back(d.as_string());
+                    // PLUGINS_DIR (optional array)
+                    if (has(fam, "PLUGINS_DIR")) {
+                        const auto& arr = fam.at("PLUGINS_DIR").as_array();
+                        if (!arr.empty()) {
+                            out << "PLUGINS_DIR = [";
+                            bool first = true;
+                            for (const auto& d : arr) {
+                                if (!first) out << ", ";
+                                first = false;
+                                out << toml_escape(d.is_string() ? d.as_string() : "");
                             }
-                            if (!dirs.empty()) {
-                                fc.emplace("PLUGINS_DIR", ordered_value(std::move(dirs),
-                                    toml::array_format_info{toml::array_format::oneline}));
-                            }
+                            out << "]\n";
                         }
-
-                        fams_arr.push_back(ordered_value(std::move(fc)));
                     }
-                    if (!fams_arr.empty()) {
-                        tc.emplace("FAMILIES", ordered_value(std::move(fams_arr),
-                            toml::array_format_info{toml::array_format::array_of_tables}));
-                    }
+                    out << '\n';
                 }
-                tokens_arr.push_back(ordered_value(std::move(tc)));
             }
-        }
-        if (!tokens_arr.empty()) {
-            cfg.emplace("TOKENS", ordered_value(std::move(tokens_arr),
-                toml::array_format_info{toml::array_format::array_of_tables}));
         }
     }
 
     // ===== Module 段 =====
     auto write_mod = [&](const std::string& name) {
-        ordered_value::table_type sec;
-        if (exists(old_tbl, name)) {
-            const auto& s = old_tbl.at(name).as_table();
-            sec.emplace("ENABLED",          get_bool(s, "ENABLED", false));
-            sec.emplace("LIST_ENDPOINT",    get_str(s, "LIST_ENDPOINT", ""));
-            sec.emplace("OPERATE_ENDPOINT", get_str(s, "OPERATE_ENDPOINT", ""));
-            sec.emplace("STATE3_PENDING",   get_str(s, "STATE3_PENDING", ""));
-            sec.emplace("STATE3_APPROVED",  get_str(s, "STATE3_APPROVED", ""));
-            sec.emplace("STATE3_REJECTED",  get_str(s, "STATE3_REJECTED", ""));
+        out << '[' << name << "]\n";
+        if (has(old, name)) {
+            const auto& s = old.at(name);
+            write_bool("ENABLED",          get_bool(s, "ENABLED", false));
+            write_str("LIST_ENDPOINT",     get_str(s, "LIST_ENDPOINT", ""));
+            write_str("OPERATE_ENDPOINT",  get_str(s, "OPERATE_ENDPOINT", ""));
+            write_str("STATE3_PENDING",    get_str(s, "STATE3_PENDING", ""));
+            write_str("STATE3_APPROVED",   get_str(s, "STATE3_APPROVED", ""));
+            write_str("STATE3_REJECTED",   get_str(s, "STATE3_REJECTED", ""));
         } else {
-            sec.emplace("ENABLED",          false);
-            sec.emplace("LIST_ENDPOINT",    "");
-            sec.emplace("OPERATE_ENDPOINT", "");
-            sec.emplace("STATE3_PENDING",   "");
-            sec.emplace("STATE3_APPROVED",  "");
-            sec.emplace("STATE3_REJECTED",  "");
+            write_bool("ENABLED",          false);
+            write_str("LIST_ENDPOINT",     "");
+            write_str("OPERATE_ENDPOINT",  "");
+            write_str("STATE3_PENDING",    "");
+            write_str("STATE3_APPROVED",   "");
+            write_str("STATE3_REJECTED",   "");
         }
-        cfg.emplace(name, ordered_value(std::move(sec)));
+        out << '\n';
     };
     write_mod("JOIN");
     write_mod("UP");
@@ -2081,47 +2072,33 @@ static bool migrate_config(const std::string& old_path, const std::string& new_p
     write_mod("COMMENT");
 
     // ===== [PLUGINS] =====
-    {
-        ordered_value::table_type sec;
-        // dirs
-        {
-            ordered_value::array_type dirs;
-            dirs.push_back(std::string("./plugins"));
-            dirs.push_back(std::string("./plugins/examples"));
-            if (exists(old_tbl, "PLUGINS") && exists(old_tbl.at("PLUGINS").as_table(), "dirs")) {
-                ordered_value::array_type custom_dirs;
-                for (const auto& d : old_tbl.at("PLUGINS").as_table().at("dirs").as_array()) {
-                    if (d.is_string()) custom_dirs.push_back(d.as_string());
-                }
-                if (!custom_dirs.empty()) dirs = std::move(custom_dirs);
-            }
-            sec.emplace("dirs", ordered_value(std::move(dirs), toml::array_format_info{toml::array_format::oneline}));
+    out << "[PLUGINS]\n";
+    out << "dirs = [";
+    if (has(old, "PLUGINS") && has(old.at("PLUGINS"), "dirs")) {
+        bool first = true;
+        for (const auto& d : old.at("PLUGINS").at("dirs").as_array()) {
+            if (!first) out << ", ";
+            first = false;
+            out << toml_escape(d.is_string() ? d.as_string() : "");
         }
-        // [[PLUGINS.LOAD]]
-        if (exists(old_tbl, "PLUGINS") && exists(old_tbl.at("PLUGINS").as_table(), "LOAD")) {
-            ordered_value::array_type load_arr;
-            for (const auto& item : old_tbl.at("PLUGINS").as_table().at("LOAD").as_array()) {
-                if (!item.is_table()) continue;
-                const auto& item_tbl = item.as_table();
-                ordered_value::table_type li;
-                if (exists(item_tbl, "name"))       li.emplace("name",       get_str(item_tbl, "name", ""));
-                if (exists(item_tbl, "file"))       li.emplace("file",       get_str(item_tbl, "file", ""));
-                if (exists(item_tbl, "enabled"))    li.emplace("enabled",    get_bool(item_tbl, "enabled", true));
-                if (exists(item_tbl, "allow_exec")) li.emplace("allow_exec", get_bool(item_tbl, "allow_exec", false));
-                if (exists(item_tbl, "config"))     li.emplace("config",     item_tbl.at("config"));
-                if (!li.empty()) load_arr.push_back(ordered_value(std::move(li)));
-            }
-            if (!load_arr.empty()) {
-                sec.emplace("LOAD", ordered_value(std::move(load_arr),
-                    toml::array_format_info{toml::array_format::array_of_tables}));
-            }
-        }
-        cfg.emplace("PLUGINS", ordered_value(std::move(sec)));
+    } else {
+        out << toml_escape("./plugins") << ", " << toml_escape("./plugins/examples");
     }
+    out << "]\n";
 
-    // 序列化为 TOML 字符串
-    ordered_value new_config(std::move(cfg));
-    std::string output = toml::format(new_config);
+    // [[PLUGINS.LOAD]]
+    if (has(old, "PLUGINS") && has(old.at("PLUGINS"), "LOAD")) {
+        for (const auto& item : old.at("PLUGINS").at("LOAD").as_array()) {
+            if (!item.is_table()) continue;
+            out << "[[PLUGINS.LOAD]]\n";
+            if (has(item, "name"))       write_str("name",       get_str(item, "name", ""));
+            if (has(item, "file"))       write_str("file",       get_str(item, "file", ""));
+            if (has(item, "enabled"))    write_bool("enabled",    get_bool(item, "enabled", true));
+            if (has(item, "allow_exec")) write_bool("allow_exec", get_bool(item, "allow_exec", false));
+            // config 子表跳过，避免复杂迭代逻辑
+            out << '\n';
+        }
+    }
 
     // 如果输出路径与旧路径相同，先备份
     if (new_path == old_path) {
@@ -2137,17 +2114,17 @@ static bool migrate_config(const std::string& old_path, const std::string& new_p
     }
 
     // 写入新配置
-    std::ofstream out(new_path);
-    if (!out) {
+    std::ofstream outfile(new_path);
+    if (!outfile) {
         g_log.error("配置迁移: 无法写入 %s", new_path.c_str());
         return false;
     }
-    out << output;
-    if (!out.good()) {
+    outfile << out.str();
+    if (!outfile.good()) {
         g_log.error("配置迁移: 写入 %s 失败", new_path.c_str());
         return false;
     }
-    out.close();
+    outfile.close();
 
     g_log.info("配置迁移: 已生成 %s", new_path.c_str());
     return true;
