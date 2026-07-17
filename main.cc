@@ -1942,9 +1942,7 @@ static bool migrate_config(const std::string& old_path, const std::string& new_p
 
     auto copy_str = [&](const std::string& k, const std::string& d) { cfg.emplace(k, get_str(old_tbl, k, d)); };
     auto copy_int = [&](const std::string& k, std::int64_t d)   { cfg.emplace(k, get_int(old_tbl, k, d)); };
-    auto copy_bool = [&](const std::string& k, bool d)          { cfg.emplace(k, get_bool(old_tbl, k, d)); };
     auto copy_opt_str = [&](const std::string& k, const std::string& d) { if (exists(old_tbl, k)) cfg.emplace(k, get_str(old_tbl, k, d)); };
-    auto copy_opt_int = [&](const std::string& k, std::int64_t d)       { if (exists(old_tbl, k)) cfg.emplace(k, get_int(old_tbl, k, d)); };
     auto copy_opt_bool = [&](const std::string& k, bool d)              { if (exists(old_tbl, k)) cfg.emplace(k, get_bool(old_tbl, k, d)); };
 
     // ===== 顶层标量 =====

@@ -227,6 +227,9 @@ bool PluginManager::load_plugin(const PluginLoadConfig& cfg) {
     return true;
 }
 
+// Forward declarations for file-scope helpers defined later
+static void stop_plugin_process(PluginInstance* inst);
+
 void PluginManager::unload_all() {
     std::lock_guard<std::mutex> lk(mtx_);
 
