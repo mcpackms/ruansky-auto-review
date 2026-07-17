@@ -1852,6 +1852,12 @@ static void load_config(const std::string& path = "settings.toml") {
             fc.enable_up_resource = toml::find<bool>(fam, "ENABLE_UP_RESOURCE");
             fc.max_up_resource_coin = toml::find<int>(fam, "MAX_UP_RESOURCE_COIN");
             fc.min_level = toml::find<int>(fam, "MIN_LEVEL");
+            if (fam.contains("PLUGINS")) {
+                auto& plugins_arr = fam.at("PLUGINS").as_array();
+                for (auto& p : plugins_arr) {
+                    fc.plugins.push_back(std::string(p.as_string()));
+                }
+            }
             tc.families.push_back(fc);
         }
         g_config.tokens.push_back(tc);
@@ -1962,6 +1968,18 @@ int main(int argc, char* argv[]) {
             g_log.error("[PLUGIN]\t解析失败:\t%s", e.what());
             g_log_queue.push("[ERROR]\t[PLUGIN]\t解析配置失败: " + std::string(e.what()));
         }
+
+        // 注册每个家族的插件配置
+        for (auto& tc : g_config.tokens) {
+            for (auto& f : tc.families) {
+                if (!f.plugins.empty()) {
+                    g_plugin_mgr.set_family_plugins(f.family_id, f.plugins);
+                }
+            }
+        }
+
+        // 启动插件自动重载线程（每5分钟检测一次）
+        g_plugin_mgr.start_auto_reload(300);
 
         std::vector<std::unique_ptr<TokenReviewer>> reviewers;
         reviewers.reserve(g_config.tokens.size());

@@ -1,9 +1,13 @@
 // plugin_manager.h - Plugin manager for Node.js plugin system
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
+#include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include <toml.hpp>
@@ -39,6 +43,9 @@ struct PluginInstance {
 
     // KV store (loaded from/saved to disk)
     nlohmann::json store;
+
+    // File modification time, for change detection
+    time_t file_mtime = 0;
 };
 
 // ==================== Plugin manager ====================
@@ -58,6 +65,17 @@ public:
 
     size_t count() const { return plugins_.size(); }
     bool empty() const { return plugins_.empty(); }
+
+    // 设置某个家族启用哪些插件（空列表 = 使用全部）
+    void set_family_plugins(const std::string& family_id,
+                            const std::vector<std::string>& plugins);
+
+    // 自动重载：扫描插件目录，新增/删除/更新已变更的插件
+    void check_and_reload();
+
+    // 启动/停止定时自动重载线程
+    void start_auto_reload(int interval_seconds = 300);
+    void stop_auto_reload();
 
     // ==================== Hook dispatchers ====================
 
@@ -111,10 +129,27 @@ private:
     // Readline helper: read one JSON line from fd with timeout
     std::string read_line(int fd, int timeout_ms);
 
+    // 检查插件是否应分发到指定家族
+    bool should_dispatch_to(const PluginInstance* inst,
+                            const std::string& family_id) const;
+
+    // 获取文件修改时间
+    static time_t get_file_mtime(const std::string& path);
+
     // All loaded plugins
     std::vector<std::unique_ptr<PluginInstance>> plugins_;
     mutable std::mutex mtx_;
     int next_id_ = 1;
+
+    // 插件搜索目录（从配置中保存）
+    std::vector<std::string> dirs_;
+
+    // 家族 -> 插件名列表，空 = 该家族使用全部插件
+    std::unordered_map<std::string, std::set<std::string>> family_plugins_;
+
+    // 自动重载线程控制
+    std::atomic<bool> auto_reload_running_{false};
+    std::thread auto_reload_thread_;
 };
 
 // Global plugin manager instance

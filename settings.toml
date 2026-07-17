@@ -42,6 +42,7 @@ ENABLE_UP = true
 ENABLE_UP_RESOURCE = false
 MAX_UP_RESOURCE_COIN = -1
 MIN_LEVEL = -1
+# PLUGINS = ["complete", "webhook"]  # 该家族专用插件列表，空=使用全部
 
 [[TOKENS.FAMILIES]]
 MIN_LEVEL = -1

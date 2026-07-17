@@ -65,17 +65,18 @@ PluginManager::PluginManager() {
 }
 
 PluginManager::~PluginManager() {
+    stop_auto_reload();
     unload_all();
 }
 
 bool PluginManager::load_from_config(const toml::value& plugins_config) {
-    std::vector<std::string> dirs = {"./plugins"};
+    dirs_ = {"./plugins"};
 
     if (plugins_config.contains("dirs")) {
-        dirs.clear();
+        dirs_.clear();
         auto& dirs_arr = plugins_config.at("dirs").as_array();
         for (auto& d : dirs_arr) {
-            dirs.push_back(d.as_string());
+            dirs_.push_back(d.as_string());
         }
     }
 
@@ -103,7 +104,7 @@ bool PluginManager::load_from_config(const toml::value& plugins_config) {
             if (entry.contains("file")) {
                 cfg.file = toml::find<std::string>(entry, "file");
                 bool found = false;
-                for (auto& dir : dirs) {
+                for (auto& dir : dirs_) {
                     std::string full_path = dir + "/" + cfg.file;
                     if (file_exists(full_path)) {
                         cfg.file = full_path;
@@ -125,7 +126,7 @@ bool PluginManager::load_from_config(const toml::value& plugins_config) {
             if (entry.contains("config")) {
                 auto& cfg_toml = entry.at("config");
                 for (auto& [k, v] : cfg_toml.as_table()) {
-                    if (v.is_string()) cfg.config[k] = v.as_string();
+                    if (v.is_string()) cfg.config[k] = std::string(v.as_string());
                     else if (v.is_integer()) cfg.config[k] = (int64_t)v.as_integer();
                     else if (v.is_floating()) cfg.config[k] = v.as_floating();
                     else if (v.is_boolean()) cfg.config[k] = v.as_boolean();
@@ -142,7 +143,7 @@ bool PluginManager::load_from_config(const toml::value& plugins_config) {
     }
 
     // Phase 2: Auto-scan directories for .js files
-    for (auto& dir : dirs) {
+    for (auto& dir : dirs_) {
         DIR* dp = opendir(dir.c_str());
         if (!dp) {
             g_log_queue.push("[WARN]  [插件] 无法打开插件目录: " + dir);
@@ -187,6 +188,7 @@ bool PluginManager::load_plugin(const PluginLoadConfig& cfg) {
     inst->file = cfg.file;
     inst->enabled = cfg.enabled;
     inst->config = cfg.config;
+    inst->file_mtime = get_file_mtime(cfg.file);
 
     if (!spawn_node(inst.get())) {
         g_log_queue.push("[ERROR] [插件] 无法启动子进程: " + cfg.name);
@@ -429,8 +431,212 @@ void PluginManager::send_command_async(PluginInstance* inst,
     if (inst->stdin_fd < 0) return;
 
     std::string cmd_str = cmd.dump() + "\n";
-    write(inst->stdin_fd, cmd_str.c_str(), cmd_str.size());
+    (void)write(inst->stdin_fd, cmd_str.c_str(), cmd_str.size());
     // Don't wait for response
+}
+
+// ==================== Family plugin filter ====================
+
+bool PluginManager::should_dispatch_to(const PluginInstance* inst,
+                                        const std::string& family_id) const {
+    auto it = family_plugins_.find(family_id);
+    if (it == family_plugins_.end()) return true;  // 无过滤，全部插件都分发
+    return it->second.count(inst->name) > 0;
+}
+
+void PluginManager::set_family_plugins(const std::string& family_id,
+                                        const std::vector<std::string>& plugins) {
+    std::set<std::string> s(plugins.begin(), plugins.end());
+    family_plugins_[family_id] = std::move(s);
+}
+
+// ==================== Auto reload ====================
+
+time_t PluginManager::get_file_mtime(const std::string& path) {
+    struct stat st;
+    if (stat(path.c_str(), &st) == 0) {
+        return st.st_mtime;
+    }
+    return 0;
+}
+
+void PluginManager::check_and_reload() {
+    // 扫描所有插件目录，获取当前文件列表
+    std::vector<PluginLoadConfig> found;
+    for (auto& dir : dirs_) {
+        DIR* dp = opendir(dir.c_str());
+        if (!dp) continue;
+        struct dirent* entry;
+        while ((entry = readdir(dp)) != nullptr) {
+            std::string name(entry->d_name);
+            if (name.empty() || name[0] == '.' || name.size() < 4) continue;
+            if (name.substr(name.size() - 3) != ".js") continue;
+            std::string plugin_name = name.substr(0, name.size() - 3);
+            if (plugin_name == "node_host") continue;
+            PluginLoadConfig cfg;
+            cfg.name = plugin_name;
+            cfg.file = dir + "/" + name;
+            found.push_back(cfg);
+        }
+        closedir(dp);
+    }
+
+    std::lock_guard<std::mutex> lk(mtx_);
+
+    // 建立当前已加载插件名 -> 索引 的映射
+    std::unordered_map<std::string, size_t> loaded_map;
+    for (size_t i = 0; i < plugins_.size(); ++i) {
+        if (plugins_[i]) {
+            loaded_map[plugins_[i]->name] = i;
+        }
+    }
+
+    // 对扫描到的文件，新增或更新
+    for (auto& f : found) {
+        auto it = loaded_map.find(f.name);
+        time_t mtime = get_file_mtime(f.file);
+
+        if (it == loaded_map.end()) {
+            // 新插件，加载
+            g_log_queue.push("[INFO]  [插件] 自动重载: 新增 " + f.name);
+            PluginLoadConfig cfg;
+            cfg.name = f.name;
+            cfg.file = f.file;
+            cfg.enabled = true;
+
+            auto inst = std::make_unique<PluginInstance>();
+            inst->name = cfg.name;
+            inst->file = cfg.file;
+            inst->enabled = cfg.enabled;
+            inst->file_mtime = mtime;
+
+            if (spawn_node(inst.get())) {
+                std::string ready_line = read_line(inst->stdout_fd, 5000);
+                if (!ready_line.empty()) {
+                    nlohmann::json load_cmd;
+                    load_cmd["id"] = 0;
+                    load_cmd["cmd"] = "load";
+                    load_cmd["file"] = cfg.file;
+                    load_cmd["config"] = nlohmann::json::object();
+                    auto resp = send_command_sync(inst.get(), load_cmd, 10000);
+                    if (!resp.is_null() && resp.value("ok", false)) {
+                        plugins_.push_back(std::move(inst));
+                        g_log_queue.push("[INFO]  [插件] 自动重载: 已加载 " + f.name);
+                    } else {
+                        close_plugin(inst.get());
+                    }
+                } else {
+                    close_plugin(inst.get());
+                }
+            }
+        } else {
+            // 已加载，检查是否变更
+            auto& existing = plugins_[it->second];
+            if (existing && existing->file_mtime != mtime) {
+                g_log_queue.push("[INFO]  [插件] 自动重载: 更新 " + f.name);
+                // 关闭旧进程
+                if (existing->pid > 0) {
+                    nlohmann::json cmd;
+                    cmd["id"] = -1;
+                    cmd["cmd"] = "shutdown";
+                    send_command_async(existing.get(), cmd);
+                    int status;
+                    pid_t ret = waitpid(existing->pid, &status, WNOHANG);
+                    if (ret == 0) {
+                        for (int i = 0; i < 20; ++i) {
+                            usleep(50000);
+                            ret = waitpid(existing->pid, &status, WNOHANG);
+                            if (ret != 0) break;
+                        }
+                    }
+                    if (ret == 0) {
+                        kill(existing->pid, SIGKILL);
+                        waitpid(existing->pid, &status, 0);
+                    }
+                }
+                close_plugin(existing.get());
+
+                // 启动新进程
+                existing->file = f.file;
+                existing->file_mtime = mtime;
+                if (spawn_node(existing.get())) {
+                    std::string ready_line = read_line(existing->stdout_fd, 5000);
+                    if (!ready_line.empty()) {
+                        nlohmann::json load_cmd;
+                        load_cmd["id"] = 0;
+                        load_cmd["cmd"] = "load";
+                        load_cmd["file"] = f.file;
+                        load_cmd["config"] = existing->config;
+                        auto resp = send_command_sync(existing.get(), load_cmd, 10000);
+                        if (resp.is_null() || !resp.value("ok", false)) {
+                            g_log_queue.push("[ERROR] [插件] 自动重载: 更新失败 " + f.name);
+                        }
+                    }
+                }
+            }
+            // 从 loaded_map 中移除，剩下的就是已删除的
+            loaded_map.erase(it);
+        }
+    }
+
+    // 遍历 loaded_map 中剩余项 = 文件已被删除的插件
+    for (auto& [name, idx] : loaded_map) {
+        auto& inst = plugins_[idx];
+        if (inst) {
+            g_log_queue.push("[INFO]  [插件] 自动重载: 移除 " + name);
+            if (inst->pid > 0) {
+                nlohmann::json cmd;
+                cmd["id"] = -1;
+                cmd["cmd"] = "shutdown";
+                send_command_async(inst.get(), cmd);
+                int status;
+                pid_t ret = waitpid(inst->pid, &status, WNOHANG);
+                if (ret == 0) {
+                    for (int i = 0; i < 20; ++i) {
+                        usleep(50000);
+                        ret = waitpid(inst->pid, &status, WNOHANG);
+                        if (ret != 0) break;
+                    }
+                }
+                if (ret == 0) {
+                    kill(inst->pid, SIGKILL);
+                    waitpid(inst->pid, &status, 0);
+                }
+            }
+            close_plugin(inst.get());
+            inst.reset();
+        }
+    }
+
+    // 清除空指针
+    plugins_.erase(std::remove_if(plugins_.begin(), plugins_.end(),
+        [](const auto& p) { return !p; }), plugins_.end());
+}
+
+void PluginManager::start_auto_reload(int interval_seconds) {
+    if (auto_reload_running_) return;
+    if (dirs_.empty()) {
+        dirs_ = {"./plugins"};
+    }
+    auto_reload_running_ = true;
+    auto_reload_thread_ = std::thread([this, interval_seconds]() {
+        while (auto_reload_running_) {
+            std::this_thread::sleep_for(std::chrono::seconds(interval_seconds));
+            if (!auto_reload_running_) break;
+            try {
+                check_and_reload();
+            } catch (...) {
+                // 避免线程崩溃
+            }
+        }
+    });
+}
+
+void PluginManager::stop_auto_reload() {
+    auto_reload_running_ = false;
+    if (auto_reload_thread_.joinable()) {
+        auto_reload_thread_.join();
+    }
 }
 
 // ==================== Build command helper ====================
@@ -458,6 +664,7 @@ JsCheckResult PluginManager::dispatch_before_check(const std::string& text,
 
     for (auto& inst : plugins_) {
         if (!inst || !inst->enabled || inst->pid <= 0) continue;
+        if (!should_dispatch_to(inst.get(), family_id)) continue;
 
         auto cmd = make_cmd(next_id_++, "onBeforeCheck", {text, family_id, type});
         auto resp = send_command_sync(inst.get(), cmd);
@@ -487,6 +694,7 @@ JsCheckResult PluginManager::dispatch_after_check(const std::string& text,
 
     for (auto& inst : plugins_) {
         if (!inst || !inst->enabled || inst->pid <= 0) continue;
+        if (!should_dispatch_to(inst.get(), family_id)) continue;
 
         auto cmd = make_cmd(next_id_++, "onAfterCheck",
                             {text, family_id, type,
@@ -517,6 +725,7 @@ void PluginManager::dispatch_item_approved(const std::string& family_id,
 
     for (auto& inst : plugins_) {
         if (!inst || !inst->enabled || inst->pid <= 0) continue;
+        if (!should_dispatch_to(inst.get(), family_id)) continue;
         auto cmd = make_cmd(0, "onItemApproved", {family_id, type, item_id});
         send_command_async(inst.get(), cmd);
     }
@@ -530,6 +739,7 @@ void PluginManager::dispatch_item_rejected(const std::string& family_id,
 
     for (auto& inst : plugins_) {
         if (!inst || !inst->enabled || inst->pid <= 0) continue;
+        if (!should_dispatch_to(inst.get(), family_id)) continue;
         auto cmd = make_cmd(0, "onItemRejected", {family_id, type, item_id, reason});
         send_command_async(inst.get(), cmd);
     }
@@ -540,6 +750,7 @@ void PluginManager::dispatch_review_round_start(const std::string& family_id) {
 
     for (auto& inst : plugins_) {
         if (!inst || !inst->enabled || inst->pid <= 0) continue;
+        if (!should_dispatch_to(inst.get(), family_id)) continue;
         auto cmd = make_cmd(0, "onReviewRoundStart", {family_id});
         send_command_async(inst.get(), cmd);
     }
@@ -551,6 +762,7 @@ void PluginManager::dispatch_review_round_end(const std::string& family_id,
 
     for (auto& inst : plugins_) {
         if (!inst || !inst->enabled || inst->pid <= 0) continue;
+        if (!should_dispatch_to(inst.get(), family_id)) continue;
         auto cmd = make_cmd(0, "onReviewRoundEnd", {family_id});
         cmd["args"] = {family_id, total, approved, rejected};
         send_command_async(inst.get(), cmd);
@@ -564,6 +776,7 @@ void PluginManager::dispatch_error(const std::string& family_id,
 
     for (auto& inst : plugins_) {
         if (!inst || !inst->enabled || inst->pid <= 0) continue;
+        if (!should_dispatch_to(inst.get(), family_id)) continue;
         auto cmd = make_cmd(0, "onError", {family_id, type, error});
         send_command_async(inst.get(), cmd);
     }
@@ -574,6 +787,7 @@ void PluginManager::dispatch_pause(const std::string& family_id) {
 
     for (auto& inst : plugins_) {
         if (!inst || !inst->enabled || inst->pid <= 0) continue;
+        if (!should_dispatch_to(inst.get(), family_id)) continue;
         auto cmd = make_cmd(0, "onPause", {family_id});
         send_command_async(inst.get(), cmd);
     }
@@ -584,6 +798,7 @@ void PluginManager::dispatch_resume(const std::string& family_id) {
 
     for (auto& inst : plugins_) {
         if (!inst || !inst->enabled || inst->pid <= 0) continue;
+        if (!should_dispatch_to(inst.get(), family_id)) continue;
         auto cmd = make_cmd(0, "onResume", {family_id});
         send_command_async(inst.get(), cmd);
     }
