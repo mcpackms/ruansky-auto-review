@@ -439,15 +439,23 @@ void PluginManager::send_command_async(PluginInstance* inst,
 
 bool PluginManager::should_dispatch_to(const PluginInstance* inst,
                                         const std::string& family_id) const {
-    auto it = family_plugins_.find(family_id);
-    if (it == family_plugins_.end()) return true;  // 无过滤，全部插件都分发
-    return it->second.count(inst->name) > 0;
+    auto it = family_plugin_dirs_.find(family_id);
+    if (it == family_plugin_dirs_.end()) return true;  // 无过滤，全部插件都分发
+    // 检查插件的文件路径是否在家族指定的目录下
+    for (auto& dir : it->second) {
+        // 标准化目录路径，确保末尾有 /
+        std::string prefix = dir;
+        if (prefix.back() != '/') prefix += '/';
+        if (inst->file.compare(0, prefix.size(), prefix) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
-void PluginManager::set_family_plugins(const std::string& family_id,
-                                        const std::vector<std::string>& plugins) {
-    std::set<std::string> s(plugins.begin(), plugins.end());
-    family_plugins_[family_id] = std::move(s);
+void PluginManager::set_family_plugin_dirs(const std::string& family_id,
+                                            const std::vector<std::string>& dirs) {
+    family_plugin_dirs_[family_id] = dirs;
 }
 
 // ==================== Auto reload ====================

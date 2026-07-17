@@ -22,7 +22,7 @@ struct FamilyConfig {
     bool enable_up_resource = false;
     int min_level = -1;
     int max_up_resource_coin = -1;  // -1 表示使用全局配置
-    std::vector<std::string> plugins;  // 该家族启用的插件列表，空表示使用全部
+    std::vector<std::string> plugins_dirs;  // 该家族专用的插件目录，空=使用全局全部
 };
 
 struct TokenConfig {

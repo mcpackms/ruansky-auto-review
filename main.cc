@@ -1852,10 +1852,10 @@ static void load_config(const std::string& path = "settings.toml") {
             fc.enable_up_resource = toml::find<bool>(fam, "ENABLE_UP_RESOURCE");
             fc.max_up_resource_coin = toml::find<int>(fam, "MAX_UP_RESOURCE_COIN");
             fc.min_level = toml::find<int>(fam, "MIN_LEVEL");
-            if (fam.contains("PLUGINS")) {
-                auto& plugins_arr = fam.at("PLUGINS").as_array();
-                for (auto& p : plugins_arr) {
-                    fc.plugins.push_back(std::string(p.as_string()));
+            if (fam.contains("PLUGINS_DIR")) {
+                auto& arr = fam.at("PLUGINS_DIR").as_array();
+                for (auto& d : arr) {
+                    fc.plugins_dirs.push_back(std::string(d.as_string()));
                 }
             }
             tc.families.push_back(fc);
@@ -1972,8 +1972,8 @@ int main(int argc, char* argv[]) {
         // 注册每个家族的插件配置
         for (auto& tc : g_config.tokens) {
             for (auto& f : tc.families) {
-                if (!f.plugins.empty()) {
-                    g_plugin_mgr.set_family_plugins(f.family_id, f.plugins);
+                if (!f.plugins_dirs.empty()) {
+                    g_plugin_mgr.set_family_plugin_dirs(f.family_id, f.plugins_dirs);
                 }
             }
         }

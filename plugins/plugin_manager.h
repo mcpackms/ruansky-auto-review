@@ -67,8 +67,8 @@ public:
     bool empty() const { return plugins_.empty(); }
 
     // 设置某个家族启用哪些插件（空列表 = 使用全部）
-    void set_family_plugins(const std::string& family_id,
-                            const std::vector<std::string>& plugins);
+    void set_family_plugin_dirs(const std::string& family_id,
+                                const std::vector<std::string>& dirs);
 
     // 自动重载：扫描插件目录，新增/删除/更新已变更的插件
     void check_and_reload();
@@ -144,8 +144,8 @@ private:
     // 插件搜索目录（从配置中保存）
     std::vector<std::string> dirs_;
 
-    // 家族 -> 插件名列表，空 = 该家族使用全部插件
-    std::unordered_map<std::string, std::set<std::string>> family_plugins_;
+    // 家族 -> 专用插件目录列表，空 = 该家族使用全部插件
+    std::unordered_map<std::string, std::vector<std::string>> family_plugin_dirs_;
 
     // 自动重载线程控制
     std::atomic<bool> auto_reload_running_{false};
