@@ -2,6 +2,12 @@
 
 基于 Node.js 子进程 JS 插件引擎的自动内容审核机器人。
 
+## 安全公告
+
+> **v1.5.0+** 插件引擎已迁移至 `vm.createContext` 沙箱执行，封锁了 `child_process`、`net`、`tls`、`vm` 等高危模块。
+> 插件只能通过白名单内置模块（`crypto`、`path`、`url` 等）和注入的安全 API（HTTP、KV、文件 I/O）进行开发。
+> 详情见 [`plugins/README.md`](plugins/README.md)。
+
 ## 依赖
 
 ### 编译依赖
@@ -92,18 +98,18 @@ cd build
 
 ## JS 插件系统
 
-支持使用 JavaScript 编写审核插件，通过 QuickJS-ng 引擎嵌入式运行。
+支持使用 JavaScript 编写审核插件，通过 **Node.js 子进程 + `vm.createContext` 沙箱**运行。
 
 ### 特性
 
-- 每个插件独立 JSRuntime + JSContext 隔离
-- 40+ 桥接 API（日志、HTTP、KV 存储、文件 I/O、编码、统计等）
-- 自动扫描目录加载 .js 文件，无需手动注册
+- 每个插件运行在独立操作系统中，崩溃不影响主程序
+- **沙箱隔离**：通过 `vm.createContext` 执行，封锁高危 Node.js 模块
+- 白名单安全内置模块（`crypto`、`path`、`url`、`util` 等）
+- 内置安全 API（日志、HTTP 请求、KV 存储、受限文件 I/O）
+- 自动扫描目录加载 `.js` 文件，无需手动注册
 - 10 种 hook 回调（检查前/后、通过/拒绝、轮次开始/结束、错误、暂停/恢复）
-- KV 键值存储自动持久化
-- 沙箱隔离（移除 eval/Function/WebAssembly）
-- 文件 I/O 限制在插件数据目录内
+- KV 键值存储自动持久化到 `plugins/data/<插件名>/store.json`
 
 ### 快速开始
 
-将 `.js` 文件放入 `plugins/` 目录即可自动加载。详见 `plugins/README.md`。
+将 `.js` 文件放入 `plugins/` 目录即可自动加载。详见 [`plugins/README.md`](plugins/README.md)。

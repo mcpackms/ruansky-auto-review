@@ -232,14 +232,23 @@ static void load_edit_toml() {
     build_cfg_fields();
 }
 
+// 声明外部配置热重载函数
+namespace {
+    // 通过递增 g_config_version 通知 family_loop 重载配置
+    extern std::atomic<int32_t> g_config_version;
+}
+
 static void save_edit_toml() {
     try {
         std::ofstream f("settings.toml");
         f << std::setw(120) << g_edit_toml;
         f.close();
         g_config_dirty = false;
+        // 触发运行时配置热重载
+        g_config_version.store(1);
+        g_log_queue.push("[" + t_now() + "] [TUI] 配置已保存，正在热重载...");
     } catch (const std::exception& e) {
-        // log error
+        g_log_queue.push("[" + t_now() + "] [TUI] 配置保存失败: " + std::string(e.what()));
     }
 }
 
@@ -249,9 +258,11 @@ static void toggle_pause(int idx) {
     if (idx < 0 || idx >= (int)g_family_list.size()) return;
     auto& info = g_family_list[idx];
     if (!info.control) return;
-    bool new_state = !info.control->paused.load();
-    info.control->paused.store(new_state);
-    std::string action = new_state ? "⏸ 暂停" : "▶ 恢复";
+    // 状态机: 0=运行中, 非0=暂停中/已暂停
+    int old_val = info.control->paused.load();
+    int new_val = (old_val == 0) ? 1 : 0;  // 1 表示暂停请求
+    info.control->paused.store(new_val);
+    std::string action = (new_val != 0) ? "⏸ 暂停" : "▶ 恢复";
     g_log_queue.push("[" + t_now() + "] [TUI] " + action + "\t家族" + info.family_id);
 }
 

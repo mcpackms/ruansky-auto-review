@@ -308,6 +308,7 @@ Config g_config;
 WordsData g_bad_words;
 RegexData g_regex_data;
 std::string g_config_path = "settings.toml";
+std::atomic<int32_t> g_config_version{0};  // 递增后通知 family_loop 重载配置
 
 // Web 面板 & 插件系统访问器（避免包含 DoubleArrayAC 定义）
 int get_bad_words_count() { return static_cast<int>(g_bad_words.words.size()); }
@@ -372,49 +373,61 @@ struct ReviewStats {
     std::atomic<int32_t> total{0}, approved{0}, rejected{0};
 };
 
+// 统计快照（无锁、无原子操作的一致副本）
+struct ReviewStatsSnapshot {
+    int32_t total = 0, approved = 0, rejected = 0;
+};
+
 class TokenReviewer {
 public:
     std::string token;
     std::string uid;
     std::vector<FamilyConfig> families;
 
-    ReviewStats& get_post_stats(const std::string& fid) {
+    // 返回一致快照（在锁保护下读取全部字段）
+    ReviewStatsSnapshot get_post_stats_snapshot(const std::string& fid) {
         std::lock_guard<std::mutex> lk(mtx_);
-        return post_stats_[fid];
+        auto& s = post_stats_[fid];
+        return {s.total.load(), s.approved.load(), s.rejected.load()};
     }
-    ReviewStats& get_comment_stats(const std::string& fid) {
+    ReviewStatsSnapshot get_comment_stats_snapshot(const std::string& fid) {
         std::lock_guard<std::mutex> lk(mtx_);
-        return comment_stats_[fid];
+        auto& s = comment_stats_[fid];
+        return {s.total.load(), s.approved.load(), s.rejected.load()};
     }
-    ReviewStats& get_join_stats(const std::string& fid) {
+    ReviewStatsSnapshot get_join_stats_snapshot(const std::string& fid) {
         std::lock_guard<std::mutex> lk(mtx_);
-        return join_stats_[fid];
+        auto& s = join_stats_[fid];
+        return {s.total.load(), s.approved.load(), s.rejected.load()};
     }
-    ReviewStats& get_up_stats(const std::string& fid) {
+    ReviewStatsSnapshot get_up_stats_snapshot(const std::string& fid) {
         std::lock_guard<std::mutex> lk(mtx_);
-        return up_stats_[fid];
+        auto& s = up_stats_[fid];
+        return {s.total.load(), s.approved.load(), s.rejected.load()};
+    }
+    ReviewStatsSnapshot get_up_resource_stats_snapshot(const std::string& fid) {
+        std::lock_guard<std::mutex> lk(mtx_);
+        auto& s = up_resource_stats_[fid];
+        return {s.total.load(), s.approved.load(), s.rejected.load()};
     }
 
-    void add_post_total(const std::string& fid, int32_t d) { get_post_stats(fid).total += d; }
-    void add_post_approved(const std::string& fid, int32_t d) { get_post_stats(fid).approved += d; }
-    void add_post_rejected(const std::string& fid, int32_t d) { get_post_stats(fid).rejected += d; }
-    void add_comment_total(const std::string& fid, int32_t d) { get_comment_stats(fid).total += d; }
-    void add_comment_approved(const std::string& fid, int32_t d) { get_comment_stats(fid).approved += d; }
-    void add_comment_rejected(const std::string& fid, int32_t d) { get_comment_stats(fid).rejected += d; }
-    void add_join_total(const std::string& fid, int32_t d) { get_join_stats(fid).total += d; }
-    void add_join_approved(const std::string& fid, int32_t d) { get_join_stats(fid).approved += d; }
-    void add_join_rejected(const std::string& fid, int32_t d) { get_join_stats(fid).rejected += d; }
-    void add_up_total(const std::string& fid, int32_t d) { get_up_stats(fid).total += d; }
-    void add_up_approved(const std::string& fid, int32_t d) { get_up_stats(fid).approved += d; }
-    void add_up_rejected(const std::string& fid, int32_t d) { get_up_stats(fid).rejected += d; }
-
-    ReviewStats& get_up_resource_stats(const std::string& fid) {
-        std::lock_guard<std::mutex> lk(mtx_);
-        return up_resource_stats_[fid];
-    }
-    void add_up_resource_total(const std::string& fid, int32_t d) { get_up_resource_stats(fid).total += d; }
-    void add_up_resource_approved(const std::string& fid, int32_t d) { get_up_resource_stats(fid).approved += d; }
-    void add_up_resource_rejected(const std::string& fid, int32_t d) { get_up_resource_stats(fid).rejected += d; }
+    // 注意：以下 add_xx 方法在锁外做原子递增，单个 atomic 的 += 本身是原子的，
+    // 但多个字段的跨字段一致性由读取方通过 get_xx_snapshot 保证。
+    void add_post_total(const std::string& fid, int32_t d) { post_stats_[fid].total += d; }
+    void add_post_approved(const std::string& fid, int32_t d) { post_stats_[fid].approved += d; }
+    void add_post_rejected(const std::string& fid, int32_t d) { post_stats_[fid].rejected += d; }
+    void add_comment_total(const std::string& fid, int32_t d) { comment_stats_[fid].total += d; }
+    void add_comment_approved(const std::string& fid, int32_t d) { comment_stats_[fid].approved += d; }
+    void add_comment_rejected(const std::string& fid, int32_t d) { comment_stats_[fid].rejected += d; }
+    void add_join_total(const std::string& fid, int32_t d) { join_stats_[fid].total += d; }
+    void add_join_approved(const std::string& fid, int32_t d) { join_stats_[fid].approved += d; }
+    void add_join_rejected(const std::string& fid, int32_t d) { join_stats_[fid].rejected += d; }
+    void add_up_total(const std::string& fid, int32_t d) { up_stats_[fid].total += d; }
+    void add_up_approved(const std::string& fid, int32_t d) { up_stats_[fid].approved += d; }
+    void add_up_rejected(const std::string& fid, int32_t d) { up_stats_[fid].rejected += d; }
+    void add_up_resource_total(const std::string& fid, int32_t d) { up_resource_stats_[fid].total += d; }
+    void add_up_resource_approved(const std::string& fid, int32_t d) { up_resource_stats_[fid].approved += d; }
+    void add_up_resource_rejected(const std::string& fid, int32_t d) { up_resource_stats_[fid].rejected += d; }
 
 private:
     std::mutex mtx_;
@@ -1628,14 +1641,22 @@ static void family_loop(TokenReviewer* rev, const FamilyConfig& fam) {
     while (g_running) {
         g_plugin_mgr.dispatch_review_round_start(fam.family_id);
         // 暂停检查 (一次运行模式跳过)
+        // 使用状态机防止 TOCTOU 竞态：
+        //   0 = 运行中, 1 = 暂停中, 2 = 已暂停, 3 = 恢复中
         if (!g_once_mode) {
-            // 插件暂停/恢复通知
-            bool was_paused = control->paused.load();
-            while (control->paused && g_running) {
+            int old_state = 0;
+            if (control->paused.load()) {
+                // 进入暂停
+                control->paused.store(2);  // 标记为已暂停
+                old_state = 2;
+                g_plugin_mgr.dispatch_pause(fam.family_id);
+            }
+            while (control->paused.load() != 0 && g_running) {
                 control->last_activity = time(nullptr);
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
             }
-            if (was_paused && !control->paused.load()) {
+            // 如果之前是暂停状态且现在不再暂停，才发送恢复通知
+            if (old_state == 2 && control->paused.load() == 0) {
                 g_plugin_mgr.dispatch_resume(fam.family_id);
             }
             if (!g_running) break;
@@ -1749,6 +1770,39 @@ static void family_loop(TokenReviewer* rev, const FamilyConfig& fam) {
             g_log.info("[%s] %s 家族%s\t一次运行完成",
                 now_str().c_str(), masked_token.c_str(), fam.family_id.c_str());
             break;
+        }
+
+        // 检查配置版本号，如果有更新则重载热配置
+        if (g_config_version.load() != 0) {
+            g_log.info("[%s] %s 家族%s\t♻️ 检测到配置更新，重载中...",
+                now_str().c_str(), masked_token.c_str(), fam.family_id.c_str());
+            // 重新解析配置文件，更新可热重载字段
+            try {
+                auto new_data = toml::parse(g_config_path);
+                if (new_data.contains("CONCURRENCY")) {
+                    int new_c = toml::find<int>(new_data, "CONCURRENCY");
+                    g_config.concurrency = new_c;
+                }
+                if (new_data.contains("REQUEST_DELAY_MS")) {
+                    int new_d = toml::find<int>(new_data, "REQUEST_DELAY_MS");
+                    g_config.request_delay_ms = new_d;
+                }
+                if (new_data.contains("ENABLE_REGEX")) {
+                    g_config.enable_regex = toml::find<bool>(new_data, "ENABLE_REGEX");
+                }
+                if (new_data.contains("MAX_UP_RESOURCE_COIN")) {
+                    g_config.max_up_resource_coin = toml::find<int>(new_data, "MAX_UP_RESOURCE_COIN");
+                }
+                if (new_data.contains("CHECK_INTERVAL_SECONDS")) {
+                    g_config.check_interval_seconds = toml::find<int>(new_data, "CHECK_INTERVAL_SECONDS");
+                }
+                g_log.info("[%s] %s 家族%s\t✅ 配置热重载完成",
+                    now_str().c_str(), masked_token.c_str(), fam.family_id.c_str());
+            } catch (const std::exception& e) {
+                g_log.error("[%s] %s 家族%s\t❌ 配置热重载失败: %s",
+                    now_str().c_str(), masked_token.c_str(), fam.family_id.c_str(), e.what());
+            }
+            g_config_version.store(0);  // 重置标记
         }
 
         g_plugin_mgr.dispatch_review_round_end(fam.family_id, 0, 0, 0);
@@ -2317,32 +2371,32 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // ===== 设置统计回调（所有模式共用） =====
+        // ===== 设置统计回调（所有模式共用，使用快照保证一致性） =====
         g_get_family_stats = [&reviewers](const std::string& fid) -> TuiFamilyStats {
             TuiFamilyStats s;
             for (auto& r : reviewers) {
                 for (auto& f : r->families) {
                     if (f.family_id == fid) {
-                        auto& ps = r->get_post_stats(fid);
-                        s.post_total = ps.total.load();
-                        s.post_approved = ps.approved.load();
-                        s.post_rejected = ps.rejected.load();
-                        auto& cs = r->get_comment_stats(fid);
-                        s.comment_total = cs.total.load();
-                        s.comment_approved = cs.approved.load();
-                        s.comment_rejected = cs.rejected.load();
-                        auto& js = r->get_join_stats(fid);
-                        s.join_total = js.total.load();
-                        s.join_approved = js.approved.load();
-                        s.join_rejected = js.rejected.load();
-                        auto& us = r->get_up_stats(fid);
-                        s.up_total = us.total.load();
-                        s.up_approved = us.approved.load();
-                        s.up_rejected = us.rejected.load();
-                        auto& urs = r->get_up_resource_stats(fid);
-                        s.up_resource_total = urs.total.load();
-                        s.up_resource_approved = urs.approved.load();
-                        s.up_resource_rejected = urs.rejected.load();
+                        auto ps = r->get_post_stats_snapshot(fid);
+                        s.post_total = ps.total;
+                        s.post_approved = ps.approved;
+                        s.post_rejected = ps.rejected;
+                        auto cs = r->get_comment_stats_snapshot(fid);
+                        s.comment_total = cs.total;
+                        s.comment_approved = cs.approved;
+                        s.comment_rejected = cs.rejected;
+                        auto js = r->get_join_stats_snapshot(fid);
+                        s.join_total = js.total;
+                        s.join_approved = js.approved;
+                        s.join_rejected = js.rejected;
+                        auto us = r->get_up_stats_snapshot(fid);
+                        s.up_total = us.total;
+                        s.up_approved = us.approved;
+                        s.up_rejected = us.rejected;
+                        auto urs = r->get_up_resource_stats_snapshot(fid);
+                        s.up_resource_total = urs.total;
+                        s.up_resource_approved = urs.approved;
+                        s.up_resource_rejected = urs.rejected;
                         return s;
                     }
                 }

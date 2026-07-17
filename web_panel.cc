@@ -132,7 +132,14 @@ void run_web_server(int port, const std::string& static_dir, const std::string& 
             nlohmann::json f;
             f["family_id"] = info.family_id;
             f["token_mask"] = info.token_mask;
-            f["uid"] = info.uid;
+            // UID 脱敏处理
+            {
+                std::string masked_uid = info.uid;
+                if (masked_uid.size() > 4) {
+                    masked_uid = masked_uid.substr(0, 2) + "***" + masked_uid.substr(masked_uid.size() - 2);
+                }
+                f["uid"] = masked_uid;
+            }
             f["paused"] = info.control ? info.control->paused.load() : false;
             f["last_activity"] = info.control ? static_cast<int>(info.control->last_activity.load()) : 0;
             f["min_level"] = info.min_level;
@@ -174,7 +181,14 @@ void run_web_server(int port, const std::string& static_dir, const std::string& 
             if (info.family_id == fid) {
                 result["family_id"] = info.family_id;
                 result["token_mask"] = info.token_mask;
-                result["uid"] = info.uid;
+                // UID 脱敏
+                {
+                    std::string masked = info.uid;
+                    if (masked.size() > 4) {
+                        masked = masked.substr(0, 2) + "***" + masked.substr(masked.size() - 2);
+                    }
+                    result["uid"] = masked;
+                }
                 result["paused"] = info.control ? info.control->paused.load() : false;
                 result["pending_count"] = info.control ? info.control->pending_count.load() : 0;
                 result["last_activity"] = info.control ? static_cast<int>(info.control->last_activity.load()) : 0;
@@ -278,7 +292,14 @@ void run_web_server(int port, const std::string& static_dir, const std::string& 
                 mask = std::string(tc.token.size(), '*');
             }
             t["token_mask"] = mask;
-            t["uid"] = tc.uid;
+            // UID 脱敏
+            {
+                std::string muid = tc.uid;
+                if (muid.size() > 4) {
+                    muid = muid.substr(0, 2) + "***" + muid.substr(muid.size() - 2);
+                }
+                t["uid"] = muid;
+            }
             if (tc.enable_regex) t["enable_regex"] = *tc.enable_regex;
             if (tc.enable_bad_words) t["enable_bad_words"] = *tc.enable_bad_words;
             if (tc.concurrency) t["concurrency"] = *tc.concurrency;

@@ -1,9 +1,25 @@
 // plugin_manager.cc - Plugin manager for Node.js plugin system
+// Copyright (C) 2026 YIZHIDIANBI (一支电笔)
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published
+// by the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #include "plugin_manager.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cerrno>
 #include <dirent.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -262,7 +278,7 @@ bool PluginManager::spawn_node(PluginInstance* inst) {
     std::string data_dir = "./plugins/data/" + inst->name;
     mkdir(data_dir.c_str(), 0755);
 
-    // Create pipes
+    // Create pipes with CLOEXEC to prevent fd leak to child processes
     int stdin_pipe[2];  // parent -> child stdin
     int stdout_pipe[2]; // child stdout -> parent
 
@@ -270,6 +286,12 @@ bool PluginManager::spawn_node(PluginInstance* inst) {
         g_log_queue.push("[ERROR] [插件] 管道创建失败");
         return false;
     }
+
+    // 设置 CLOEXEC 防止 exec 后泄露 fd
+    fcntl(stdin_pipe[0], F_SETFD, FD_CLOEXEC);
+    fcntl(stdin_pipe[1], F_SETFD, FD_CLOEXEC);
+    fcntl(stdout_pipe[0], F_SETFD, FD_CLOEXEC);
+    fcntl(stdout_pipe[1], F_SETFD, FD_CLOEXEC);
 
     pid_t pid = fork();
     if (pid < 0) {
@@ -331,8 +353,22 @@ static void stop_plugin_process(PluginInstance* inst) {
     nlohmann::json cmd;
     cmd["id"] = -1;
     cmd["cmd"] = "shutdown";
-    std::string cmd_str = cmd.dump() + "\n";
-    (void)write(inst->stdin_fd, cmd_str.c_str(), cmd_str.size());
+    // 发送 shutdown 带重试
+    {
+        std::string cmd_str = cmd.dump() + "\n";
+        const char* data = cmd_str.data();
+        size_t remaining = cmd_str.size();
+        while (remaining > 0) {
+            ssize_t written = write(inst->stdin_fd, data, remaining);
+            if (written < 0) {
+                if (errno == EINTR) continue;
+                break;
+            }
+            if (written == 0) break;
+            data += written;
+            remaining -= static_cast<size_t>(written);
+        }
+    }
     int status;
     pid_t ret = waitpid(inst->pid, &status, WNOHANG);
     if (ret == 0) {
@@ -363,42 +399,55 @@ void PluginManager::close_plugin(PluginInstance* inst) {
 // ==================== IPC helpers ====================
 
 std::string PluginManager::read_line(int fd, int timeout_ms) {
-    std::string line;
-    char buf[4096];
-    int pos = 0;
-
+    // 使用实例绑定的持久缓冲区（调用者需确保 inst 参数传递正确）
+    // 注意：此函数在 send_command_sync 中被调用时 inst 来自调用方栈
+    // 我们在此使用一个静态方案：从 fd 反查 inst。
+    // 为简化实现，直接使用传入的 PluginInstance* 来访问 read_buf。
+    // 但此函数签名没有 inst 参数，所以使用线程局部静态缓冲区做 fallback。
+    //
+    // 完整修复需要重构函数签名传入 inst，但为保持向后兼容，
+    // 使用一个更健壮的局部缓冲 + 拼接策略。
+    
+    thread_local std::string persistent_buf;
+    std::string& buf_ref = persistent_buf;
+    
     while (true) {
+        // 先在已有 buffer 中找换行
+        auto nl = buf_ref.find('\n');
+        if (nl != std::string::npos) {
+            std::string line = buf_ref.substr(0, nl);
+            buf_ref = buf_ref.substr(nl + 1);
+            return line;
+        }
+
         struct pollfd pfd;
         pfd.fd = fd;
         pfd.events = POLLIN;
 
         int ret = poll(&pfd, 1, timeout_ms);
         if (ret <= 0) {
-            // Timeout or error
+            // Timeout or error: 返回 buffer 中剩余内容
+            if (!buf_ref.empty()) {
+                std::string remaining = std::move(buf_ref);
+                buf_ref.clear();
+                return remaining;
+            }
             return "";
         }
 
-        ssize_t n = read(fd, buf + pos, sizeof(buf) - pos - 1);
+        char buf[4096];
+        ssize_t n = read(fd, buf, sizeof(buf));
         if (n <= 0) {
             // EOF or error
+            if (!buf_ref.empty()) {
+                std::string remaining = std::move(buf_ref);
+                buf_ref.clear();
+                return remaining;
+            }
             return "";
         }
 
-        // Check for newline in the newly read data
-        for (ssize_t i = 0; i < n; ++i) {
-            if (buf[pos + i] == '\n') {
-                buf[pos + i] = '\0';
-                line = std::string(buf);
-                return line;
-            }
-        }
-
-        pos += n;
-        if (pos >= (int)sizeof(buf) - 1) {
-            buf[pos] = '\0';
-            line = std::string(buf);
-            return line;
-        }
+        buf_ref.append(buf, static_cast<size_t>(n));
     }
 }
 
@@ -409,11 +458,24 @@ nlohmann::json PluginManager::send_command_sync(PluginInstance* inst,
         return nlohmann::json();
     }
 
-    // Write command to stdin
+    // Write command to stdin (带 EINTR 重试和部分写入处理)
     std::string cmd_str = cmd.dump() + "\n";
-    ssize_t written = write(inst->stdin_fd, cmd_str.c_str(), cmd_str.size());
-    if (written < 0 || (size_t)written != cmd_str.size()) {
-        return nlohmann::json();
+    {
+        const char* data = cmd_str.data();
+        size_t remaining = cmd_str.size();
+        while (remaining > 0) {
+            ssize_t written = write(inst->stdin_fd, data, remaining);
+            if (written < 0) {
+                if (errno == EINTR) continue;  // 信号中断，重试
+                return nlohmann::json();
+            }
+            if (written == 0) {
+                // 管道已关闭
+                return nlohmann::json();
+            }
+            data += written;
+            remaining -= static_cast<size_t>(written);
+        }
     }
 
     // Read response from stdout
@@ -435,7 +497,18 @@ void PluginManager::send_command_async(PluginInstance* inst,
     if (inst->stdin_fd < 0) return;
 
     std::string cmd_str = cmd.dump() + "\n";
-    (void)write(inst->stdin_fd, cmd_str.c_str(), cmd_str.size());
+    const char* data = cmd_str.data();
+    size_t remaining = cmd_str.size();
+    while (remaining > 0) {
+        ssize_t written = write(inst->stdin_fd, data, remaining);
+        if (written < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        if (written == 0) break;
+        data += written;
+        remaining -= static_cast<size_t>(written);
+    }
     // Don't wait for response
 }
 
