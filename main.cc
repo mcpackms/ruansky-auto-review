@@ -1935,7 +1935,7 @@ static bool migrate_config(const std::string& old_path, const std::string& new_p
 
     auto get_str = [&](const auto& tbl, const std::string& key, const std::string& def) -> std::string {
         if (!tbl.is_table()) return def;
-        try { const auto& v = tbl.at(key); return v.is_string() ? v.as_string() : def; }
+        try { const auto& v = tbl.at(key); return v.is_string() ? std::string(v.as_string()) : def; }
         catch (...) { return def; }
     };
 
