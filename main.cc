@@ -1942,8 +1942,6 @@ static bool migrate_config(const std::string& old_path, const std::string& new_p
 
     auto copy_str = [&](const std::string& k, const std::string& d) { cfg.emplace(k, get_str(old_tbl, k, d)); };
     auto copy_int = [&](const std::string& k, std::int64_t d)   { cfg.emplace(k, get_int(old_tbl, k, d)); };
-    auto copy_opt_str = [&](const std::string& k, const std::string& d) { if (exists(old_tbl, k)) cfg.emplace(k, get_str(old_tbl, k, d)); };
-    auto copy_opt_bool = [&](const std::string& k, bool d)              { if (exists(old_tbl, k)) cfg.emplace(k, get_bool(old_tbl, k, d)); };
 
     // ===== 顶层标量 =====
     copy_str("SIGN_CONST", "");
@@ -1957,11 +1955,11 @@ static bool migrate_config(const std::string& old_path, const std::string& new_p
     copy_int("REQUEST_DELAY_MS", 100);
     copy_str("OS_INFO", "");
     copy_str("PAGE", "1");
-    copy_opt_bool("ENABLE_REGEX", true);
+    cfg.emplace("ENABLE_REGEX", get_bool(old_tbl, "ENABLE_REGEX", true));
     copy_int("CHECK_INTERVAL_SECONDS", 300);
     copy_int("CONCURRENCY", 2);
     copy_int("MAX_UP_RESOURCE_COIN", -1);
-    copy_opt_str("THEME", "tokyo-night");
+    cfg.emplace("THEME", get_str(old_tbl, "THEME", "tokyo-night"));
 
     // ===== [TUI] =====
     {
@@ -2002,12 +2000,12 @@ static bool migrate_config(const std::string& old_path, const std::string& new_p
                 const auto& tok_tbl = tok.as_table();
 
                 ordered_value::table_type tc;
-                tc.emplace("TOKEN", get_str(tok_tbl, "TOKEN", ""));
-                tc.emplace("UID",   get_str(tok_tbl, "UID", ""));
-                if (exists(tok_tbl, "ENABLE_REGEX"))    tc.emplace("ENABLE_REGEX",    get_bool(tok_tbl, "ENABLE_REGEX", true));
-                if (exists(tok_tbl, "ENABLE_BADWORDS")) tc.emplace("ENABLE_BADWORDS", get_bool(tok_tbl, "ENABLE_BADWORDS", true));
-                if (exists(tok_tbl, "CONCURRENCY"))     tc.emplace("CONCURRENCY",     get_int(tok_tbl, "CONCURRENCY", 2));
-                if (exists(tok_tbl, "REQUEST_DELAY_MS")) tc.emplace("REQUEST_DELAY_MS", get_int(tok_tbl, "REQUEST_DELAY_MS", 100));
+                tc.emplace("TOKEN",            get_str(tok_tbl, "TOKEN", ""));
+                tc.emplace("UID",              get_str(tok_tbl, "UID", ""));
+                tc.emplace("ENABLE_REGEX",     get_bool(tok_tbl, "ENABLE_REGEX", true));
+                tc.emplace("ENABLE_BADWORDS",  get_bool(tok_tbl, "ENABLE_BADWORDS", true));
+                tc.emplace("CONCURRENCY",      get_int(tok_tbl, "CONCURRENCY", 2));
+                tc.emplace("REQUEST_DELAY_MS", get_int(tok_tbl, "REQUEST_DELAY_MS", 100));
 
                 // [[TOKENS.FAMILIES]]
                 if (exists(tok_tbl, "FAMILIES")) {
