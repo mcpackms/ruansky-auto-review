@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <algorithm>
 #include <set>
 #include <signal.h>
 #include <sstream>
@@ -230,30 +231,7 @@ void PluginManager::unload_all() {
     std::lock_guard<std::mutex> lk(mtx_);
 
     for (auto& inst : plugins_) {
-        if (inst && inst->pid > 0) {
-            // Send shutdown command
-            nlohmann::json cmd;
-            cmd["id"] = -1;
-            cmd["cmd"] = "shutdown";
-            send_command_async(inst.get(), cmd);
-
-            // Wait briefly for graceful shutdown
-            int status;
-            pid_t ret = waitpid(inst->pid, &status, WNOHANG);
-            if (ret == 0) {
-                // Not exited yet, wait a bit
-                for (int i = 0; i < 20; ++i) {
-                    usleep(50000);  // 50ms intervals, up to 1s
-                    ret = waitpid(inst->pid, &status, WNOHANG);
-                    if (ret != 0) break;
-                }
-            }
-            if (ret == 0) {
-                // Force kill
-                kill(inst->pid, SIGKILL);
-                waitpid(inst->pid, &status, 0);
-            }
-        }
+        stop_plugin_process(inst.get());
         close_plugin(inst.get());
     }
 
@@ -342,6 +320,29 @@ bool PluginManager::spawn_node(PluginInstance* inst) {
     fcntl(inst->stdout_fd, F_SETFL, flags | O_NONBLOCK);
 
     return true;
+}
+
+// 停止插件子进程：先发 shutdown、等 1s、再 SIGKILL
+static void stop_plugin_process(PluginInstance* inst) {
+    if (!inst || inst->pid <= 0) return;
+    nlohmann::json cmd;
+    cmd["id"] = -1;
+    cmd["cmd"] = "shutdown";
+    std::string cmd_str = cmd.dump() + "\n";
+    (void)write(inst->stdin_fd, cmd_str.c_str(), cmd_str.size());
+    int status;
+    pid_t ret = waitpid(inst->pid, &status, WNOHANG);
+    if (ret == 0) {
+        for (int i = 0; i < 20; ++i) {
+            usleep(50000);
+            ret = waitpid(inst->pid, &status, WNOHANG);
+            if (ret != 0) break;
+        }
+    }
+    if (ret == 0) {
+        kill(inst->pid, SIGKILL);
+        waitpid(inst->pid, &status, 0);
+    }
 }
 
 void PluginManager::close_plugin(PluginInstance* inst) {
@@ -443,6 +444,7 @@ bool PluginManager::should_dispatch_to(const PluginInstance* inst,
     if (it == family_plugin_dirs_.end()) return true;  // 无过滤，全部插件都分发
     // 检查插件的文件路径是否在家族指定的目录下
     for (auto& dir : it->second) {
+        if (dir.empty()) continue;
         // 标准化目录路径，确保末尾有 /
         std::string prefix = dir;
         if (prefix.back() != '/') prefix += '/';
@@ -469,7 +471,7 @@ time_t PluginManager::get_file_mtime(const std::string& path) {
 }
 
 void PluginManager::check_and_reload() {
-    // 扫描所有插件目录，获取当前文件列表
+    // Phase 1: 扫描目录（无需锁）
     std::vector<PluginLoadConfig> found;
     for (auto& dir : dirs_) {
         DIR* dp = opendir(dir.c_str());
@@ -489,145 +491,146 @@ void PluginManager::check_and_reload() {
         closedir(dp);
     }
 
-    std::lock_guard<std::mutex> lk(mtx_);
+    // Phase 2: 比对，决定增/删/改（短持锁）
+    // 新插件要 spawn 的实例和要更新的实例（key = name, value = new instance）
+    std::vector<std::unique_ptr<PluginInstance>> new_instances;
+    struct UpdateEntry { size_t idx; std::unique_ptr<PluginInstance> inst; };
+    std::vector<UpdateEntry> update_instances;
+    std::vector<size_t> remove_indices;  // 由大到小排列
 
-    // 建立当前已加载插件名 -> 索引 的映射
-    std::unordered_map<std::string, size_t> loaded_map;
-    for (size_t i = 0; i < plugins_.size(); ++i) {
-        if (plugins_[i]) {
-            loaded_map[plugins_[i]->name] = i;
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+
+        std::unordered_map<std::string, size_t> loaded_map;
+        for (size_t i = 0; i < plugins_.size(); ++i) {
+            if (plugins_[i]) {
+                loaded_map[plugins_[i]->name] = i;
+            }
+        }
+
+        for (auto& f : found) {
+            auto it = loaded_map.find(f.name);
+            time_t mtime = get_file_mtime(f.file);
+
+            if (it == loaded_map.end()) {
+                // 新插件
+                auto inst = std::make_unique<PluginInstance>();
+                inst->name = f.name;
+                inst->file = f.file;
+                inst->enabled = true;
+                inst->file_mtime = mtime;
+                new_instances.push_back(std::move(inst));
+            } else {
+                auto& existing = plugins_[it->second];
+                if (existing && existing->file_mtime != mtime) {
+                    // 变更，准备替换
+                    auto new_inst = std::make_unique<PluginInstance>();
+                    new_inst->name = f.name;
+                    new_inst->file = f.file;
+                    new_inst->enabled = existing->enabled;
+                    new_inst->config = existing->config;
+                    new_inst->file_mtime = mtime;
+                    UpdateEntry ue{it->second, std::move(new_inst)};
+                    update_instances.push_back(std::move(ue));
+                }
+                loaded_map.erase(it);
+            }
+        }
+
+        // 剩余项 = 文件已删除的插件
+        remove_indices.reserve(loaded_map.size());
+        for (auto& [name, idx] : loaded_map) {
+            remove_indices.push_back(idx);
+        }
+        // 从大到小排序，方便从 vector 中移除
+        std::sort(remove_indices.rbegin(), remove_indices.rend());
+    }
+    // 至此锁已释放
+
+    // Phase 3: 启动新进程（不持锁，不影响 dispatcher）
+    auto spawn_and_load = [this](PluginInstance* inst) -> bool {
+        if (!spawn_node(inst)) return false;
+        std::string ready_line = read_line(inst->stdout_fd, 5000);
+        if (ready_line.empty()) {
+            close_plugin(inst);
+            return false;
+        }
+        nlohmann::json load_cmd;
+        load_cmd["id"] = 0;
+        load_cmd["cmd"] = "load";
+        load_cmd["file"] = inst->file;
+        load_cmd["config"] = inst->config;
+        auto resp = send_command_sync(inst, load_cmd, 10000);
+        if (resp.is_null() || !resp.value("ok", false)) {
+            close_plugin(inst);
+            return false;
+        }
+        return true;
+    };
+
+    // 新增
+    int added = 0, updated = 0, removed = 0;
+    for (auto& inst : new_instances) {
+        if (spawn_and_load(inst.get())) {
+            std::lock_guard<std::mutex> lk(mtx_);
+            plugins_.push_back(std::move(inst));
+            added++;
         }
     }
 
-    // 对扫描到的文件，新增或更新
-    for (auto& f : found) {
-        auto it = loaded_map.find(f.name);
-        time_t mtime = get_file_mtime(f.file);
-
-        if (it == loaded_map.end()) {
-            // 新插件，加载
-            g_log_queue.push("[INFO]  [插件] 自动重载: 新增 " + f.name);
-            PluginLoadConfig cfg;
-            cfg.name = f.name;
-            cfg.file = f.file;
-            cfg.enabled = true;
-
-            auto inst = std::make_unique<PluginInstance>();
-            inst->name = cfg.name;
-            inst->file = cfg.file;
-            inst->enabled = cfg.enabled;
-            inst->file_mtime = mtime;
-
-            if (spawn_node(inst.get())) {
-                std::string ready_line = read_line(inst->stdout_fd, 5000);
-                if (!ready_line.empty()) {
-                    nlohmann::json load_cmd;
-                    load_cmd["id"] = 0;
-                    load_cmd["cmd"] = "load";
-                    load_cmd["file"] = cfg.file;
-                    load_cmd["config"] = nlohmann::json::object();
-                    auto resp = send_command_sync(inst.get(), load_cmd, 10000);
-                    if (!resp.is_null() && resp.value("ok", false)) {
-                        plugins_.push_back(std::move(inst));
-                        g_log_queue.push("[INFO]  [插件] 自动重载: 已加载 " + f.name);
-                    } else {
-                        close_plugin(inst.get());
-                    }
-                } else {
-                    close_plugin(inst.get());
-                }
-            }
-        } else {
-            // 已加载，检查是否变更
-            auto& existing = plugins_[it->second];
-            if (existing && existing->file_mtime != mtime) {
-                g_log_queue.push("[INFO]  [插件] 自动重载: 更新 " + f.name);
-                // 关闭旧进程
-                if (existing->pid > 0) {
-                    nlohmann::json cmd;
-                    cmd["id"] = -1;
-                    cmd["cmd"] = "shutdown";
-                    send_command_async(existing.get(), cmd);
-                    int status;
-                    pid_t ret = waitpid(existing->pid, &status, WNOHANG);
-                    if (ret == 0) {
-                        for (int i = 0; i < 20; ++i) {
-                            usleep(50000);
-                            ret = waitpid(existing->pid, &status, WNOHANG);
-                            if (ret != 0) break;
-                        }
-                    }
-                    if (ret == 0) {
-                        kill(existing->pid, SIGKILL);
-                        waitpid(existing->pid, &status, 0);
-                    }
-                }
+    // 更新：停旧 -> 换新
+    for (auto& ue : update_instances) {
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            auto& existing = plugins_[ue.idx];
+            if (existing) {
+                stop_plugin_process(existing.get());
                 close_plugin(existing.get());
-
-                // 启动新进程
-                existing->file = f.file;
-                existing->file_mtime = mtime;
-                if (spawn_node(existing.get())) {
-                    std::string ready_line = read_line(existing->stdout_fd, 5000);
-                    if (!ready_line.empty()) {
-                        nlohmann::json load_cmd;
-                        load_cmd["id"] = 0;
-                        load_cmd["cmd"] = "load";
-                        load_cmd["file"] = f.file;
-                        load_cmd["config"] = existing->config;
-                        auto resp = send_command_sync(existing.get(), load_cmd, 10000);
-                        if (resp.is_null() || !resp.value("ok", false)) {
-                            g_log_queue.push("[ERROR] [插件] 自动重载: 更新失败 " + f.name);
-                        }
-                    }
-                }
             }
-            // 从 loaded_map 中移除，剩下的就是已删除的
-            loaded_map.erase(it);
+        }
+        if (spawn_and_load(ue.inst.get())) {
+            std::lock_guard<std::mutex> lk(mtx_);
+            plugins_[ue.idx] = std::move(ue.inst);
+            updated++;
+        } else {
+            std::lock_guard<std::mutex> lk(mtx_);
+            plugins_[ue.idx].reset();  // 标记为空位
         }
     }
 
-    // 遍历 loaded_map 中剩余项 = 文件已被删除的插件
-    for (auto& [name, idx] : loaded_map) {
+    // 移除
+    for (size_t idx : remove_indices) {
+        std::lock_guard<std::mutex> lk(mtx_);
         auto& inst = plugins_[idx];
         if (inst) {
-            g_log_queue.push("[INFO]  [插件] 自动重载: 移除 " + name);
-            if (inst->pid > 0) {
-                nlohmann::json cmd;
-                cmd["id"] = -1;
-                cmd["cmd"] = "shutdown";
-                send_command_async(inst.get(), cmd);
-                int status;
-                pid_t ret = waitpid(inst->pid, &status, WNOHANG);
-                if (ret == 0) {
-                    for (int i = 0; i < 20; ++i) {
-                        usleep(50000);
-                        ret = waitpid(inst->pid, &status, WNOHANG);
-                        if (ret != 0) break;
-                    }
-                }
-                if (ret == 0) {
-                    kill(inst->pid, SIGKILL);
-                    waitpid(inst->pid, &status, 0);
-                }
-            }
+            stop_plugin_process(inst.get());
             close_plugin(inst.get());
             inst.reset();
+            removed++;
         }
     }
 
     // 清除空指针
-    plugins_.erase(std::remove_if(plugins_.begin(), plugins_.end(),
-        [](const auto& p) { return !p; }), plugins_.end());
+    if (removed > 0 || updated > 0) {
+        std::lock_guard<std::mutex> lk(mtx_);
+        plugins_.erase(std::remove_if(plugins_.begin(), plugins_.end(),
+            [](const auto& p) { return !p; }), plugins_.end());
+    }
+
+    int total = added + updated + removed;
+    if (total > 0) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "[INFO]  [插件] 自动重载: +%d ~%d -%d", added, updated, removed);
+        g_log_queue.push(buf);
+    }
 }
 
 void PluginManager::start_auto_reload(int interval_seconds) {
-    if (auto_reload_running_) return;
     if (dirs_.empty()) {
         dirs_ = {"./plugins"};
     }
-    auto_reload_running_ = true;
-    auto_reload_thread_ = std::thread([this, interval_seconds]() {
+    // 先创建线程，再设标记，避免 stop 检查 joinable 时线程句柄尚未赋值
+    auto t = std::thread([this, interval_seconds]() {
         while (auto_reload_running_) {
             std::this_thread::sleep_for(std::chrono::seconds(interval_seconds));
             if (!auto_reload_running_) break;
@@ -638,6 +641,8 @@ void PluginManager::start_auto_reload(int interval_seconds) {
             }
         }
     });
+    auto_reload_running_ = true;
+    auto_reload_thread_ = std::move(t);
 }
 
 void PluginManager::stop_auto_reload() {
