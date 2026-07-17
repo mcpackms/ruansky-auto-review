@@ -33,6 +33,7 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <algorithm>
 #include <climits>
 #include <cstdlib>
 
@@ -40,9 +41,10 @@
 #include <curl/curl.h>
 #include <openssl/evp.h>
 #include <nlohmann/json.hpp>
+#include <functional>
+
 #define PCRE2_CODE_UNIT_WIDTH 8
 #include <pcre2.h>
-#include <functional>
 
 #include "tui.h"
 #include "web_panel.h"
@@ -86,6 +88,7 @@ class DoubleArrayAC {
     std::vector<int> check_;
     std::vector<int> fail_;
     std::vector<std::vector<int>> out_;
+    int next_candidate_ = 1;
 
     static constexpr int ROOT = 0;
 
@@ -154,8 +157,7 @@ public:
             if (children.empty()) continue;
 
             // 寻找合适的 base 值 (从游标开始，避免重复扫描已占位)
-            static int s_next_candidate = 1;
-            int b = s_next_candidate;
+            int b = next_candidate_;
             while (true) {
                 bool ok = true;
                 for (auto& [cc, _] : children) {
@@ -168,7 +170,7 @@ public:
                 if (ok) break;
                 b++;
             }
-            s_next_candidate = b;
+            next_candidate_ = b;
 
             base_[cur_pos] = b;
 
@@ -689,12 +691,12 @@ struct CheckResult {
     if (ereg && !g_regex_data.enabled) ereg = false;
 
     const std::string& lower = checker.to_lower();
-    std::string original = std::string(checker.original());
+    std::string orig_text(checker.original());
 
     // 插件 before-check 钩子
     if (!family_id.empty() && !type.empty()) {
         JsCheckResult plugin_result = g_plugin_mgr.dispatch_before_check(
-            original, family_id, type);
+            orig_text, family_id, type);
         if (plugin_result.should_reject) {
             return CheckResult{true, plugin_result.reason};
         }
@@ -736,7 +738,7 @@ struct CheckResult {
     // 插件 after-check 钩子
     if (!family_id.empty() && !type.empty()) {
         JsCheckResult plugin_result = g_plugin_mgr.dispatch_after_check(
-            original, JsCheckResult{result.should_reject, result.reason},
+            orig_text, JsCheckResult{result.should_reject, result.reason},
             family_id, type);
         if (plugin_result.should_reject) {
             result.should_reject = true;
@@ -869,19 +871,22 @@ static size_t write_cb(void* p, size_t s, size_t n, void* u) {
     std::vector<std::string> id_fields = is_comment
         ? std::vector<std::string>{"id", "cid"}
         : std::vector<std::string>{"id", "pid", "post_id"};
+
+    auto id_field_str = [](const nlohmann::json& item, const std::vector<std::string>& fields) -> std::string {
+        for (auto& field : fields) {
+            if (!item.contains(field)) continue;
+            if (item[field].is_string()) return item[field].get<std::string>();
+            if (item[field].is_number_integer()) return std::to_string(item[field].get<int64_t>());
+            if (item[field].is_number()) return std::to_string(item[field].get<double>());
+        }
+        return "";
+    };
     std::vector<std::vector<std::string>> text_groups = is_comment
         ? std::vector<std::vector<std::string>>{{"content", "body"}}
         : std::vector<std::vector<std::string>>{{"content", "body"}, {"title", "subject"}};
 
     for (auto& item : result["data"]) {
-        std::string id;
-        for (auto& field : id_fields) {
-            if (!item.contains(field)) continue;
-            if (item[field].is_string()) id = item[field].get<std::string>();
-            else if (item[field].is_number_integer()) id = std::to_string(item[field].get<int64_t>());
-            else if (item[field].is_number()) id = std::to_string(item[field].get<double>());
-            if (!id.empty()) break;
-        }
+        std::string id = id_field_str(item, id_fields);
         if (id.empty()) continue;
 
         std::string full_text;
@@ -1013,21 +1018,14 @@ static size_t write_cb(void* p, size_t s, size_t n, void* u) {
 }
 
 [[nodiscard]] static bool operate_join(const ModuleConfig& mod, const nlohmann::json& item,
-    const FamilyConfig& fam, const std::string& token, const std::string& uid, CurlHandle& ch) {
+    const FamilyConfig& fam, const std::string& token, const std::string& uid, CurlHandle& ch,
+    const std::string& status, const std::string& msg) {
     std::string id;
     if (item.contains("id")) {
         if (item["id"].is_string()) id = item["id"].get<std::string>();
         else if (item["id"].is_number_integer()) id = std::to_string(item["id"].get<int64_t>());
         else id = item["id"].dump();
     } else return false;
-
-    int level = extract_level(item);
-    std::string status = mod.state3_approved;
-    std::string msg;
-    if (fam.min_level != -1 && level < fam.min_level) {
-        status = mod.state3_rejected;
-        msg = "等级不够";
-    }
 
     std::unordered_map<std::string, std::string> sign_params;
     sign_params["uid"] = uid;
@@ -1559,15 +1557,18 @@ static void process_join_items(const ModuleConfig& mod, TokenReviewer* rev,
                         else if ((*item)["id"].is_number_integer()) id = std::to_string((*item)["id"].get<int64_t>());
                         else id = (*item)["id"].dump();
                     }
-                    if (fam.min_level != -1 && level < fam.min_level) {
-                        bool ok = operate_join(mod, *item, fam, rev->token, rev->uid, *ch);
-                        if (ok) rejected++; else failed++;
+                    bool should_reject = (fam.min_level != -1 && level < fam.min_level);
+                    std::string status = should_reject ? mod.state3_rejected : mod.state3_approved;
+                    std::string msg = should_reject ? "等级不够" : "";
+                    bool ok = operate_join(mod, *item, fam, rev->token, rev->uid, *ch, status, msg);
+                    if (ok) {
+                        if (should_reject) rejected++; else approved++;
                         log_action(rev->token, fam.family_id, "加入", id,
-                            ok ? "拒绝" : "拒绝失败", "等级不足 Lv" + std::to_string(level));
+                            ok ? (should_reject ? "拒绝" : "通过") : "操作失败",
+                            should_reject ? "等级不足 Lv" + std::to_string(level) : "");
                     } else {
-                        bool ok = operate_join(mod, *item, fam, rev->token, rev->uid, *ch);
-                        if (ok) approved++; else failed++;
-                        log_action(rev->token, fam.family_id, "加入", id, ok ? "通过" : "通过失败");
+                        failed++;
+                        log_action(rev->token, fam.family_id, "加入", id, "操作失败");
                     }
                 } catch (const std::exception& e) {
                     g_log.error("[%s] %s 家族%s\t加入 ID=%s HTTP异常: %s",
@@ -1897,6 +1898,265 @@ static void load_regex_words() {
     g_log.info("✅ 正则违禁词:\t%zu 条", g_regex_data.patterns.size());
 }
 
+// ==================== 配置迁移工具 ====================
+// 读取旧的 settings.toml，生成规范化新配置，保留所有用户数据
+static bool migrate_config(const std::string& old_path, const std::string& new_path) {
+    namespace toml = ::toml;
+    using ordered_value = toml::basic_value<toml::ordered_type_config>;
+
+    // 解析旧配置
+    ordered_value old;
+    try {
+        old = toml::parse<toml::ordered_type_config>(old_path);
+    } catch (const std::exception& e) {
+        g_log.error("配置迁移: 无法解析旧配置 %s: %s", old_path.c_str(), e.what());
+        return false;
+    }
+
+    if (!old.is_table()) {
+        g_log.error("配置迁移: 旧配置根不是表");
+        return false;
+    }
+
+    const auto& old_tbl = old.as_table();
+
+    // 泛型取值助手
+    auto exists = [&](const ordered_value::table_type& tbl, const std::string& key) -> bool {
+        return tbl.count(key) > 0;
+    };
+    auto get_str = [&](const ordered_value::table_type& tbl, const std::string& k, const std::string& d) -> std::string {
+        auto it = tbl.find(k);
+        return (it != tbl.end() && it->second.is_string()) ? it->second.as_string() : d;
+    };
+    auto get_int = [&](const ordered_value::table_type& tbl, const std::string& k, std::int64_t d) -> std::int64_t {
+        auto it = tbl.find(k);
+        return (it != tbl.end() && it->second.is_integer()) ? it->second.as_integer() : d;
+    };
+    auto get_bool = [&](const ordered_value::table_type& tbl, const std::string& k, bool d) -> bool {
+        auto it = tbl.find(k);
+        return (it != tbl.end() && it->second.is_boolean()) ? it->second.as_boolean() : d;
+    };
+
+    // 构建新配置表（有序）
+    ordered_value::table_type cfg;
+
+    auto copy_str = [&](const std::string& k, const std::string& d) { cfg.emplace(k, get_str(old_tbl, k, d)); };
+    auto copy_int = [&](const std::string& k, std::int64_t d)   { cfg.emplace(k, get_int(old_tbl, k, d)); };
+    auto copy_bool = [&](const std::string& k, bool d)          { cfg.emplace(k, get_bool(old_tbl, k, d)); };
+    auto copy_opt_str = [&](const std::string& k, const std::string& d) { if (exists(old_tbl, k)) cfg.emplace(k, get_str(old_tbl, k, d)); };
+    auto copy_opt_int = [&](const std::string& k, std::int64_t d)       { if (exists(old_tbl, k)) cfg.emplace(k, get_int(old_tbl, k, d)); };
+    auto copy_opt_bool = [&](const std::string& k, bool d)              { if (exists(old_tbl, k)) cfg.emplace(k, get_bool(old_tbl, k, d)); };
+
+    // ===== 顶层标量 =====
+    copy_str("SIGN_CONST", "");
+    copy_str("API_LEVEL", "36");
+    copy_str("LIMIT", "50");
+    copy_str("BASE_URL", "");
+    copy_str("CHANNEL", "rtk");
+    copy_str("USER_AGENT", "");
+    copy_str("VERSION", "");
+    copy_str("PHONE_MODEL", "");
+    copy_int("REQUEST_DELAY_MS", 100);
+    copy_str("OS_INFO", "");
+    copy_str("PAGE", "1");
+    copy_opt_bool("ENABLE_REGEX", true);
+    copy_int("CHECK_INTERVAL_SECONDS", 300);
+    copy_int("CONCURRENCY", 2);
+    copy_int("MAX_UP_RESOURCE_COIN", -1);
+    copy_opt_str("THEME", "tokyo-night");
+
+    // ===== [TUI] =====
+    {
+        ordered_value::table_type sec;
+        if (exists(old_tbl, "TUI")) {
+            const auto& s = old_tbl.at("TUI").as_table();
+            sec.emplace("ENABLED", get_bool(s, "ENABLED", true));
+        } else {
+            sec.emplace("ENABLED", true);
+        }
+        cfg.emplace("TUI", ordered_value(std::move(sec)));
+    }
+
+    // ===== [WEB] =====
+    {
+        ordered_value::table_type sec;
+        if (exists(old_tbl, "WEB")) {
+            const auto& s = old_tbl.at("WEB").as_table();
+            sec.emplace("ENABLED", get_bool(s, "ENABLED", false));
+            sec.emplace("PORT",    get_int(s, "PORT", 2356));
+            sec.emplace("BIND",    get_str(s, "BIND", "127.0.0.1"));
+            sec.emplace("ROOT",    get_str(s, "ROOT", "./web"));
+        } else {
+            sec.emplace("ENABLED", false);
+            sec.emplace("PORT", 2356);
+            sec.emplace("BIND", "127.0.0.1");
+            sec.emplace("ROOT", "./web");
+        }
+        cfg.emplace("WEB", ordered_value(std::move(sec)));
+    }
+
+    // ===== [[TOKENS]] =====
+    {
+        ordered_value::array_type tokens_arr;
+        if (exists(old_tbl, "TOKENS")) {
+            for (const auto& tok : old_tbl.at("TOKENS").as_array()) {
+                if (!tok.is_table()) continue;
+                const auto& tok_tbl = tok.as_table();
+
+                ordered_value::table_type tc;
+                tc.emplace("TOKEN", get_str(tok_tbl, "TOKEN", ""));
+                tc.emplace("UID",   get_str(tok_tbl, "UID", ""));
+                if (exists(tok_tbl, "ENABLE_REGEX"))    tc.emplace("ENABLE_REGEX",    get_bool(tok_tbl, "ENABLE_REGEX", true));
+                if (exists(tok_tbl, "ENABLE_BADWORDS")) tc.emplace("ENABLE_BADWORDS", get_bool(tok_tbl, "ENABLE_BADWORDS", true));
+                if (exists(tok_tbl, "CONCURRENCY"))     tc.emplace("CONCURRENCY",     get_int(tok_tbl, "CONCURRENCY", 2));
+                if (exists(tok_tbl, "REQUEST_DELAY_MS")) tc.emplace("REQUEST_DELAY_MS", get_int(tok_tbl, "REQUEST_DELAY_MS", 100));
+
+                // [[TOKENS.FAMILIES]]
+                if (exists(tok_tbl, "FAMILIES")) {
+                    ordered_value::array_type fams_arr;
+                    for (const auto& fam : tok_tbl.at("FAMILIES").as_array()) {
+                        if (!fam.is_table()) continue;
+                        const auto& fam_tbl = fam.as_table();
+
+                        ordered_value::table_type fc;
+                        fc.emplace("FAMILY_ID",             get_str(fam_tbl, "FAMILY_ID", ""));
+                        fc.emplace("MID",                   get_str(fam_tbl, "MID", ""));
+                        fc.emplace("ENABLE_POST",           get_bool(fam_tbl, "ENABLE_POST", false));
+                        fc.emplace("ENABLE_COMMENT",        get_bool(fam_tbl, "ENABLE_COMMENT", false));
+                        fc.emplace("ENABLE_JOIN",           get_bool(fam_tbl, "ENABLE_JOIN", false));
+                        fc.emplace("ENABLE_UP",             get_bool(fam_tbl, "ENABLE_UP", false));
+                        fc.emplace("ENABLE_UP_RESOURCE",    get_bool(fam_tbl, "ENABLE_UP_RESOURCE", false));
+                        fc.emplace("MAX_UP_RESOURCE_COIN",  get_int(fam_tbl, "MAX_UP_RESOURCE_COIN", -1));
+                        fc.emplace("MIN_LEVEL",             get_int(fam_tbl, "MIN_LEVEL", -1));
+
+                        // PLUGINS_DIR (optional array)
+                        if (exists(fam_tbl, "PLUGINS_DIR")) {
+                            ordered_value::array_type dirs;
+                            for (const auto& d : fam_tbl.at("PLUGINS_DIR").as_array()) {
+                                if (d.is_string()) dirs.push_back(d.as_string());
+                            }
+                            if (!dirs.empty()) {
+                                fc.emplace("PLUGINS_DIR", ordered_value(std::move(dirs),
+                                    toml::array_format_info{toml::array_format::oneline}));
+                            }
+                        }
+
+                        fams_arr.push_back(ordered_value(std::move(fc)));
+                    }
+                    if (!fams_arr.empty()) {
+                        tc.emplace("FAMILIES", ordered_value(std::move(fams_arr),
+                            toml::array_format_info{toml::array_format::array_of_tables}));
+                    }
+                }
+                tokens_arr.push_back(ordered_value(std::move(tc)));
+            }
+        }
+        if (!tokens_arr.empty()) {
+            cfg.emplace("TOKENS", ordered_value(std::move(tokens_arr),
+                toml::array_format_info{toml::array_format::array_of_tables}));
+        }
+    }
+
+    // ===== Module 段 =====
+    auto write_mod = [&](const std::string& name) {
+        ordered_value::table_type sec;
+        if (exists(old_tbl, name)) {
+            const auto& s = old_tbl.at(name).as_table();
+            sec.emplace("ENABLED",          get_bool(s, "ENABLED", false));
+            sec.emplace("LIST_ENDPOINT",    get_str(s, "LIST_ENDPOINT", ""));
+            sec.emplace("OPERATE_ENDPOINT", get_str(s, "OPERATE_ENDPOINT", ""));
+            sec.emplace("STATE3_PENDING",   get_str(s, "STATE3_PENDING", ""));
+            sec.emplace("STATE3_APPROVED",  get_str(s, "STATE3_APPROVED", ""));
+            sec.emplace("STATE3_REJECTED",  get_str(s, "STATE3_REJECTED", ""));
+        } else {
+            sec.emplace("ENABLED",          false);
+            sec.emplace("LIST_ENDPOINT",    "");
+            sec.emplace("OPERATE_ENDPOINT", "");
+            sec.emplace("STATE3_PENDING",   "");
+            sec.emplace("STATE3_APPROVED",  "");
+            sec.emplace("STATE3_REJECTED",  "");
+        }
+        cfg.emplace(name, ordered_value(std::move(sec)));
+    };
+    write_mod("JOIN");
+    write_mod("UP");
+    write_mod("UP_RESOURCE");
+    write_mod("POST");
+    write_mod("COMMENT");
+
+    // ===== [PLUGINS] =====
+    {
+        ordered_value::table_type sec;
+        // dirs
+        {
+            ordered_value::array_type dirs;
+            dirs.push_back(std::string("./plugins"));
+            dirs.push_back(std::string("./plugins/examples"));
+            if (exists(old_tbl, "PLUGINS") && exists(old_tbl.at("PLUGINS").as_table(), "dirs")) {
+                ordered_value::array_type custom_dirs;
+                for (const auto& d : old_tbl.at("PLUGINS").as_table().at("dirs").as_array()) {
+                    if (d.is_string()) custom_dirs.push_back(d.as_string());
+                }
+                if (!custom_dirs.empty()) dirs = std::move(custom_dirs);
+            }
+            sec.emplace("dirs", ordered_value(std::move(dirs), toml::array_format_info{toml::array_format::oneline}));
+        }
+        // [[PLUGINS.LOAD]]
+        if (exists(old_tbl, "PLUGINS") && exists(old_tbl.at("PLUGINS").as_table(), "LOAD")) {
+            ordered_value::array_type load_arr;
+            for (const auto& item : old_tbl.at("PLUGINS").as_table().at("LOAD").as_array()) {
+                if (!item.is_table()) continue;
+                const auto& item_tbl = item.as_table();
+                ordered_value::table_type li;
+                if (exists(item_tbl, "name"))       li.emplace("name",       get_str(item_tbl, "name", ""));
+                if (exists(item_tbl, "file"))       li.emplace("file",       get_str(item_tbl, "file", ""));
+                if (exists(item_tbl, "enabled"))    li.emplace("enabled",    get_bool(item_tbl, "enabled", true));
+                if (exists(item_tbl, "allow_exec")) li.emplace("allow_exec", get_bool(item_tbl, "allow_exec", false));
+                if (exists(item_tbl, "config"))     li.emplace("config",     item_tbl.at("config"));
+                if (!li.empty()) load_arr.push_back(ordered_value(std::move(li)));
+            }
+            if (!load_arr.empty()) {
+                sec.emplace("LOAD", ordered_value(std::move(load_arr),
+                    toml::array_format_info{toml::array_format::array_of_tables}));
+            }
+        }
+        cfg.emplace("PLUGINS", ordered_value(std::move(sec)));
+    }
+
+    // 序列化为 TOML 字符串
+    ordered_value new_config(std::move(cfg));
+    std::string output = toml::format(new_config);
+
+    // 如果输出路径与旧路径相同，先备份
+    if (new_path == old_path) {
+        std::string bak = old_path + ".bak";
+        std::ifstream src(old_path, std::ios::binary);
+        if (src) {
+            std::ofstream dst(bak, std::ios::binary);
+            dst << src.rdbuf();
+            dst.close();
+            src.close();
+            g_log.info("配置迁移: 已备份 %s -> %s", old_path.c_str(), bak.c_str());
+        }
+    }
+
+    // 写入新配置
+    std::ofstream out(new_path);
+    if (!out) {
+        g_log.error("配置迁移: 无法写入 %s", new_path.c_str());
+        return false;
+    }
+    out << output;
+    if (!out.good()) {
+        g_log.error("配置迁移: 写入 %s 失败", new_path.c_str());
+        return false;
+    }
+    out.close();
+
+    g_log.info("配置迁移: 已生成 %s", new_path.c_str());
+    return true;
+}
+
 // ==================== 主函数 ====================
 static void print_help(const char* prog) {
     printf("high_bot 自动审核 v1.3.0 开源版\n\n");
@@ -1906,6 +2166,8 @@ static void print_help(const char* prog) {
     printf("  --config <路径>  指定配置文件路径 (默认: settings.toml)\n");
     printf("  --no-tui        禁用 TUI 界面, 日志输出到终端\n");
     printf("  -once           每个家族只审核一轮即退出\n");
+    printf("  --update-config [输出路径]\n");
+    printf("                  读取现有配置，生成规范化新配置（默认覆盖原文件，先备份为 .bak）\n");
     printf("\n");
     printf("配置文件 settings.toml 中的可用设置:\n");
     printf("  [TUI]  ENABLED     是否启用 TUI 界面 (默认: true)\n");
@@ -1926,6 +2188,19 @@ int main(int argc, char* argv[]) {
             g_once_mode = true;
         } else if (strcmp(argv[i], "--no-tui") == 0) {
             g_no_tui = true;
+        } else if (strcmp(argv[i], "--update-config") == 0) {
+            std::string out_path;
+            if (i + 1 < argc && argv[i+1][0] != '-') {
+                out_path = argv[++i];
+            }
+            curl_global_init(CURL_GLOBAL_ALL);
+            g_start_time = static_cast<int>(time(nullptr));
+            g_log.info("配置迁移工具");
+            std::string old_path = g_config_path;
+            if (out_path.empty()) out_path = old_path;
+            bool ok = migrate_config(old_path, out_path);
+            curl_global_cleanup();
+            return ok ? 0 : 1;
         } else if (strcmp(argv[i], "--config") == 0) {
             if (i + 1 < argc) {
                 g_config_path = argv[++i];
@@ -2019,21 +2294,21 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // 预填充家族控制标志 (必须在启动工作线程之前完成, 避免多线程竞态)
+        for (auto& r : reviewers) {
+            for (auto& f : r->families) {
+                if (g_family_controls.find(f.family_id) == g_family_controls.end()) {
+                    g_family_controls[f.family_id] = std::make_shared<FamilyControl>();
+                }
+            }
+        }
+
         // 启动 Worker 线程 (两种模式共用)
         std::vector<std::thread> threads;
         threads.reserve(reviewers.size() * 3);
         for (auto& r : reviewers) {
             for (auto& f : r->families) {
                 threads.emplace_back(family_loop, r.get(), f);
-            }
-        }
-
-        // 预填充家族控制标志 (所有模式都需要, 避免多线程竞态)
-        for (auto& r : reviewers) {
-            for (auto& f : r->families) {
-                if (g_family_controls.find(f.family_id) == g_family_controls.end()) {
-                    g_family_controls[f.family_id] = std::make_shared<FamilyControl>();
-                }
             }
         }
 

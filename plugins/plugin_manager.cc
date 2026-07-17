@@ -629,7 +629,8 @@ void PluginManager::start_auto_reload(int interval_seconds) {
     if (dirs_.empty()) {
         dirs_ = {"./plugins"};
     }
-    // 先创建线程，再设标记，避免 stop 检查 joinable 时线程句柄尚未赋值
+    // 必须先设标记再创建线程，否则线程启动时会读到 false 直接退出
+    auto_reload_running_ = true;
     auto t = std::thread([this, interval_seconds]() {
         while (auto_reload_running_) {
             std::this_thread::sleep_for(std::chrono::seconds(interval_seconds));
@@ -641,7 +642,6 @@ void PluginManager::start_auto_reload(int interval_seconds) {
             }
         }
     });
-    auto_reload_running_ = true;
     auto_reload_thread_ = std::move(t);
 }
 

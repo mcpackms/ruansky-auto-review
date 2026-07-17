@@ -98,7 +98,8 @@ const api = {
     readFile(relPath) {
         try {
             const full = path.join(dataDir, relPath);
-            if (full.indexOf(dataDir) !== 0) return null;
+            const rel = path.relative(dataDir, full);
+            if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
             return fs.readFileSync(full, "utf-8");
         } catch (e) {
             return null;
@@ -107,7 +108,8 @@ const api = {
     writeFile(relPath, content) {
         try {
             const full = path.join(dataDir, relPath);
-            if (full.indexOf(dataDir) !== 0) return false;
+            const rel = path.relative(dataDir, full);
+            if (rel.startsWith('..') || path.isAbsolute(rel)) return false;
             if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
             fs.writeFileSync(full, content, "utf-8");
             return true;
@@ -118,7 +120,8 @@ const api = {
     fileExists(relPath) {
         try {
             const full = path.join(dataDir, relPath);
-            if (full.indexOf(dataDir) !== 0) return false;
+            const rel = path.relative(dataDir, full);
+            if (rel.startsWith('..') || path.isAbsolute(rel)) return false;
             return fs.existsSync(full);
         } catch (e) {
             return false;

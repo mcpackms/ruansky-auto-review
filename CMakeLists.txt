@@ -34,7 +34,7 @@ endif()
 
 # toml11 (header-only)
 find_path(TOML11_INCLUDE_DIR toml.hpp
-    HINTS /usr/include /usr/local/include /data/data/com.termux/files/usr/include
+    HINTS /usr/include /usr/local/include
     PATH_SUFFIXES toml11)
 if(NOT TOML11_INCLUDE_DIR)
     find_package(toml11 CONFIG QUIET)

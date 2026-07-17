@@ -21,7 +21,7 @@ ENABLED = true
 [WEB]
 ENABLED = true
 PORT = 2356
-BIND = "0.0.0.0"
+BIND = "127.0.0.1"
 ROOT = "./web"
 
 [[TOKENS]]
