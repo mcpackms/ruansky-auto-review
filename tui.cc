@@ -233,10 +233,7 @@ static void load_edit_toml() {
 }
 
 // 声明外部配置热重载函数
-namespace {
-    // 通过递增 g_config_version 通知 family_loop 重载配置
-    extern std::atomic<int32_t> g_config_version;
-}
+extern std::atomic<int32_t> g_config_version;
 
 static void save_edit_toml() {
     try {
