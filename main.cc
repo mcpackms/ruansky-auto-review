@@ -1259,10 +1259,29 @@ static void process_up_resource_items(const ModuleConfig& mod, TokenReviewer* re
 
                     // 2. 提取文字做敏感词检查
                     std::string up_text;
-                    std::vector<std::string> text_fields = {"title", "content", "body", "description", "desc"};
+                    // 提取用户自定义文本字段（跳过平台固定值：typeName/lang/状态名/平台提示等）
+                    std::vector<std::string> text_fields = {
+                        "varName",             // 资源名称（最重要）
+                        "sourceName",          // 来源名称
+                        "sourceDescription",   // 来源描述
+                        "sourceCharacteristic",// 来源特点描述
+                        "notename",            // 备注
+                        "msg3"                 // 拒绝原因/自定义消息
+                    };
                     for (auto& f : text_fields) {
                         if (data.contains(f) && data[f].is_string()) {
                             std::string v = data[f].get<std::string>();
+                            if (!v.empty()) {
+                                if (!up_text.empty()) up_text += "\n";
+                                up_text += v;
+                            }
+                        }
+                    }
+                    // 额外提取嵌套的 family.family_name
+                    if (data.contains("family") && data["family"].is_object()) {
+                        auto& family = data["family"];
+                        if (family.contains("family_name") && family["family_name"].is_string()) {
+                            std::string v = family["family_name"].get<std::string>();
                             if (!v.empty()) {
                                 if (!up_text.empty()) up_text += "\n";
                                 up_text += v;
