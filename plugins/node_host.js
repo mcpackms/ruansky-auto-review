@@ -1,4 +1,4 @@
-// node_host.js - Node.js 插件宿主
+// node_host.js - Node.js 插件宿主（无限制版）
 // Copyright (C) 2026 YIZHIDIANBI (一支电笔)
 //
 // This program is free software: you can redistribute it and/or modify
@@ -17,7 +17,7 @@
 // 通过 stdin/stdout JSON 行协议与 C++ 主进程通信。
 // 每个插件启动一个独立的 node 进程实例。
 //
-// 安全：插件运行在 vm.createContext 沙箱中，高危模块被封锁。
+// 注意：本版本解除所有安全限制，插件拥有完整的 Node.js 权限。
 //
 // 通信通道：
 //   stdin  - C++ 写入命令（JSON Lines）
@@ -40,7 +40,6 @@
 
 const fs = require("fs");
 const path = require("path");
-const vm = require("vm");
 
 const pluginFile = path.resolve(process.argv[2]);
 const pluginName = process.argv[3] || "unknown";
@@ -112,23 +111,17 @@ const api = {
         store = {};
         saveStore();
     },
+    // 无路径限制：允许读写任何路径
     readFile(relPath) {
         try {
-            const full = path.join(dataDir, relPath);
-            const rel = path.relative(dataDir, full);
-            if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
-            return fs.readFileSync(full, "utf-8");
+            return fs.readFileSync(relPath, "utf-8");
         } catch (e) {
             return null;
         }
     },
     writeFile(relPath, content) {
         try {
-            const full = path.join(dataDir, relPath);
-            const rel = path.relative(dataDir, full);
-            if (rel.startsWith('..') || path.isAbsolute(rel)) return false;
-            if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-            fs.writeFileSync(full, content, "utf-8");
+            fs.writeFileSync(relPath, content, "utf-8");
             return true;
         } catch (e) {
             return false;
@@ -136,10 +129,7 @@ const api = {
     },
     fileExists(relPath) {
         try {
-            const full = path.join(dataDir, relPath);
-            const rel = path.relative(dataDir, full);
-            if (rel.startsWith('..') || path.isAbsolute(rel)) return false;
-            return fs.existsSync(full);
+            return fs.existsSync(relPath);
         } catch (e) {
             return false;
         }
@@ -159,148 +149,24 @@ function sendResponse(id, data) {
     process.stdout.write(JSON.stringify(data) + "\n");
 }
 
-// ==================== VM 沙箱 ====================
+// ==================== 加载插件（无沙箱，完整权限） ====================
 
-// 封锁的高危模块列表
-const BLOCKED_MODULES = new Set([
-    "child_process", "cluster", "vm", "worker_threads",
-    "net", "tls", "tty", "dgram", "dns",
-    "module", "process", "v8", "native_module", "natives"
-]);
-
-// 安全的内置模块（白名单）
-const SAFE_BUILTIN_MODULES = new Set([
-    "assert", "buffer", "crypto", "events", "path",
-    "querystring", "string_decoder", "url", "util", "zlib",
-    "punycode", "text_decoder"
-]);
-
-// 受限模块的增强限制
-function createSandboxRequire(pluginFilePath) {
-    // 缓存已加载的模块
-    const moduleCache = new Map();
-
-    return function sandboxRequire(moduleName) {
-        // 检查是否在白名单中
-        if (!SAFE_BUILTIN_MODULES.has(moduleName)) {
-            // 检查是否为被封锁的高危模块
-            if (BLOCKED_MODULES.has(moduleName)) {
-                throw new Error(
-                    `[安全] 模块 '${moduleName}' 在插件沙箱中被封锁，不允许加载`
-                );
-            }
-            // 对于非内置模块（npm 包），临时放行但做额外检查
-            // 注意：require.resolve 可能被用来路径探测
-            try {
-                const resolved = require.resolve(moduleName, { paths: [path.dirname(pluginFilePath)] });
-                // 检查是否是内置模块的别名
-                if (BLOCKED_MODULES.has(moduleName.toLowerCase())) {
-                    throw new Error(
-                        `[安全] 模块 '${moduleName}' 在插件沙箱中被封锁`
-                    );
-                }
-                // 不允许加载 node_modules 之外的任意路径
-                if (resolved.indexOf("node_modules") === -1 &&
-                    !SAFE_BUILTIN_MODULES.has(moduleName)) {
-                    throw new Error(
-                        `[安全] 只能加载内置模块或 node_modules 中的模块`
-                    );
-                }
-            } catch (e) {
-                if (e.message.startsWith("[安全]")) throw e;
-                // 尝试作为内置模块加载
-                if (SAFE_BUILTIN_MODULES.has(moduleName)) {
-                    // 允许
-                } else {
-                    throw new Error(`[安全] 模块 '${moduleName}' 不允许加载或不存在`);
-                }
-            }
-        }
-
-        if (moduleCache.has(moduleName)) {
-            return moduleCache.get(moduleName);
-        }
-        const mod = require(moduleName);
-        moduleCache.set(moduleName, mod);
-        return mod;
-    };
-}
-
-// 创建插件沙箱上下文
-function createSandboxContext(pluginFilePath, pluginName_, config) {
-    const sandbox = {
-        // ---- ECMAScript 标准全局 ----
-        Array, ArrayBuffer, Boolean, DataView, Date, Error,
-        EvalError, Float32Array, Float64Array, Function,
-        Int8Array, Int16Array, Int32Array, Uint8Array, Uint8ClampedArray,
-        Uint16Array, Uint32Array, BigInt64Array, BigUint64Array,
-        Map, Set, WeakMap, WeakSet,
-        Number, BigInt, Object, Promise, Proxy, RangeError,
-        ReferenceError, RegExp, String, Symbol, SyntaxError,
-        TypeError, URIError, AggregateError,
-        JSON, Math, Intl, Reflect,
-        // ---- Node 安全全局 ----
-        Buffer, URL, URLSearchParams, TextEncoder, TextDecoder,
-        setTimeout, clearTimeout, setInterval, clearInterval,
-        setImmediate, clearImmediate, queueMicrotask,
-        console: {
-            log: (...args) => console.error("[插件:" + pluginName_ + "]", ...args),
-            error: (...args) => console.error("[插件:" + pluginName_ + "]", ...args),
-            warn: (...args) => console.error("[插件:" + pluginName_ + "]", ...args),
-            info: (...args) => console.error("[插件:" + pluginName_ + "]", ...args),
-            debug: (...args) => console.error("[插件:" + pluginName_ + "]", ...args),
-        },
-        // ---- 插件注入 API ----
-        log: api.log,
-        print: api.print,
-        getConfig: api.getConfig,
-        timestamp: api.timestamp,
-        sleep: api.sleep,
-        kvGet: api.kvGet,
-        kvSet: api.kvSet,
-        kvDel: api.kvDel,
-        kvKeys: api.kvKeys,
-        kvClear: api.kvClear,
-        readFile: api.readFile,
-        writeFile: api.writeFile,
-        fileExists: api.fileExists,
-        httpGet: httpGet,
-        httpPost: httpPost,
-        // ---- 沙箱 require ----
-        require: createSandboxRequire(pluginFilePath),
-        // ---- CommonJS 模块系统 ----
-        module: { exports: {} },
-        exports: {},
-        __dirname: path.dirname(pluginFilePath),
-        __filename: pluginFilePath,
-        // ---- 沙箱标记（用于检测逃逸） ----
-        __sandboxed__: true,
-    };
-
-    return vm.createContext(sandbox);
-}
-
-// 在沙箱中加载插件
-async function loadPluginInSandbox(filePath, config) {
+async function loadPlugin(filePath, config) {
     pluginConfig = config;
 
-    const context = createSandboxContext(filePath, pluginName, config);
-    const code = fs.readFileSync(filePath, "utf-8");
+    // 将辅助 API 注入到全局，方便插件直接调用
+    for (const [key, fn] of Object.entries(api)) {
+        globalThis[key] = fn;
+    }
+    globalThis.httpGet = httpGet;
+    globalThis.httpPost = httpPost;
+
+    // 提供 require 快捷方式（其实插件自身 require 已可用）
+    globalThis.$require = require;
 
     try {
-        const script = new vm.Script(code, {
-            filename: filePath,
-            lineOffset: 0,
-            displayErrors: true,
-        });
-
-        script.runInContext(context, {
-            timeout: 5000,  // 5s 超时防止死循环
-            breakOnSigint: true,
-            displayErrors: true,
-        });
-
-        plugin = context.module.exports;
+        // 直接使用 require 加载插件，无任何限制
+        plugin = require(filePath);
 
         if (typeof plugin !== "object" || plugin === null) {
             sendResponse(0, { ok: false, error: "module.exports 不是对象" });
@@ -310,20 +176,13 @@ async function loadPluginInSandbox(filePath, config) {
 
         // 注入 API 到插件实例
         plugin._api = api;
-        plugin.__dirname = path.dirname(filePath);
 
         // 调用 onLoad（支持 async）
         if (typeof plugin.onLoad === "function") {
             try {
                 const ret = plugin.onLoad(config);
                 if (ret && typeof ret.then === "function") {
-                    // 异步 onLoad 需要等待但设置超时
-                    await Promise.race([
-                        ret,
-                        new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error("onLoad 超时")), 10000)
-                        )
-                    ]);
+                    await ret;
                 }
             } catch (e) {
                 console.error("[插件] onLoad 错误:", e.message);
@@ -335,11 +194,6 @@ async function loadPluginInSandbox(filePath, config) {
         sendResponse(0, { ok: false, error: e.message });
         plugin = null;
     }
-}
-
-// 加载插件（兼容旧版非沙箱路径，但走沙箱）
-async function loadPlugin(filePath, config) {
-    await loadPluginInSandbox(filePath, config);
 }
 
 // 调用 hook
@@ -385,7 +239,6 @@ rl.on("line", (line) => {
     switch (cmd) {
         case "load":
             loadStore();
-            // Resolve relative paths to absolute
             const filePath = path.resolve(msg.file);
             loadPlugin(filePath, msg.config || {}).catch(e => {
                 console.error("[插件] loadPlugin 错误:", e.message);
@@ -459,6 +312,6 @@ function httpPost(url, data, options) {
     }
 }
 
-// 就绪通知（写入 stdout，父进程等待此消息后发送 load 命令）
+// 就绪通知
 console.error(`[插件] ${pluginName} 启动 (Node ${process.version})`);
 process.stdout.write(JSON.stringify({ ready: true, name: pluginName }) + "\n");

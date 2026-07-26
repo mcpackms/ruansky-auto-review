@@ -226,7 +226,7 @@ bool PluginManager::load_plugin(const PluginLoadConfig& cfg) {
     load_cmd["file"] = cfg.file;
     load_cmd["config"] = cfg.config;
 
-    nlohmann::json resp = send_command_sync(inst.get(), load_cmd, 10000);
+    nlohmann::json resp = send_command_sync(inst.get(), load_cmd, 300000);
     if (resp.is_null() || !resp.value("ok", false)) {
         std::string err = resp.value("error", "未知错误");
         g_log_queue.push("[ERROR] [插件] 加载失败: " + cfg.name + " - " + err);
@@ -636,7 +636,7 @@ void PluginManager::check_and_reload() {
         load_cmd["cmd"] = "load";
         load_cmd["file"] = inst->file;
         load_cmd["config"] = inst->config;
-        auto resp = send_command_sync(inst, load_cmd, 10000);
+        auto resp = send_command_sync(inst, load_cmd, 300000);
         if (resp.is_null() || !resp.value("ok", false)) {
             close_plugin(inst);
             return false;

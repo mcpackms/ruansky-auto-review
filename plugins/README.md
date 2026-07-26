@@ -1,4 +1,4 @@
-# JS 插件系统开发指南
+# JS 插件系统开发指南（无限制版）
 
 ## 目录
 
@@ -14,31 +14,30 @@
 10. [调试与日志](#10-调试与日志)
 11. [最佳实践](#11-最佳实践)
 12. [完整示例](#12-完整示例)
-13. [安全注意事项](#13-安全注意事项)
-14. [通信协议](#14-通信协议)
+13. [通信协议](#13-通信协议)
 
 ---
 
 ## 1. 概述
 
-auto_review 支持使用 JavaScript 编写审核插件，通过 **Node.js 子进程 + `vm.createContext` VM 沙箱**执行。
-每个插件启动一个独立的 `node` 进程，进程内通过 `vm.createContext` 创建隔离的沙箱上下文运行插件代码，
-通过 stdin/stdout JSON 行协议与 C++ 主程序通信。
+auto_review 支持使用 JavaScript 编写审核插件，通过 **Node.js 子进程**执行。
+每个插件启动一个独立的 `node` 进程，通过 stdin/stdout JSON 行协议与 C++ 主程序通信。
 
-> 🔒 **安全设计**：沙箱封锁了 `child_process`、`net`、`vm`、`fs` 等高危模块，
-> 插件只能通过注入的安全 API（HTTP、KV 存储、受限文件 I/O）和内置白名单模块（`crypto`、`path`、`url` 等）进行开发。
-> 详情见本章[安全注意事项](#14-安全注意事项)。
+> ⚠️ **本版本已解除所有安全限制**：插件拥有完整的 Node.js 权限，
+> 可访问 `fs`、`child_process`、`net`、`http` 等所有内置模块，
+> 可读写任意文件路径，可执行任意系统命令。
+> 请自行确保只加载受信任的插件。
 
 特性：
 
-- **沙箱执行**：插件代码在 `vm.createContext` VM 上下文中运行，封锁高危模块
-- 每个插件运行在独立 OS 进程中，进程级隔离，崩溃不影响主程序
-- 支持使用 `npm` 安装的第三方库（仅限不依赖被封锁模块的安全包）
+- **完整 Node.js 权限**：无沙箱、无模块封锁、无路径限制
+- 每个插件运行在独立 OS 进程中，崩溃不影响主程序
+- 支持所有 `npm` 第三方库
 - 支持 `async/await`（Node.js 原生）
 - 自动扫描目录加载 `.js` 文件，无需手动注册
 - 10 种 hook 回调
 - KV 键值存储自动持久化到 `plugins/data/<插件名>/store.json`
-- 文件 I/O 限制在插件私有数据目录内，自动阻止路径穿越
+- 文件 I/O 无路径限制
 
 ---
 
@@ -295,24 +294,24 @@ kvClear();                    // 清空所有数据
 
 ### 6.4 文件系统
 
-文件 I/O 限制在 `plugins/data/<plugin_name>/` 目录内。
+无路径限制，可读写任意路径。
 
 #### readFile(path)
 
 ```javascript
-let content = readFile("data.json");   // 返回 string | null
+let content = readFile("/etc/passwd");   // 返回 string | null，可读任意文件
 ```
 
 #### writeFile(path, content)
 
 ```javascript
-let ok = writeFile("output.txt", "内容");  // 返回 boolean
+let ok = writeFile("/tmp/output.txt", "内容");  // 返回 boolean，可写任意路径
 ```
 
 #### fileExists(path)
 
 ```javascript
-let exists = fileExists("config.json");   // 返回 boolean
+let exists = fileExists("/etc/shadow");   // 返回 boolean
 ```
 
 ### 6.5 HTTP 请求
@@ -399,23 +398,22 @@ module.exports = {
 
 ## 8. 文件系统访问
 
-### 安全限制
+### 说明
 
-- 只能读写 `plugins/data/<plugin_name>/` 目录
-- `../` 路径穿越被阻止
-- 绝对路径被阻止
-- 目录不存在时自动创建
+- **无任何路径限制**：可读写系统任意路径
+- 支持绝对路径和相对路径
+- 目录不存在时不会自动创建（需自行处理）
 
 ### 典型用途
 
 ```javascript
-// 写入运行数据
-writeFile("runtime.json", JSON.stringify(data));
+// 写入运行数据到任意位置
+writeFile("/tmp/runtime.json", JSON.stringify(data));
 
-// 读取配置文件
-let raw = readFile("config.json");
+// 读取系统文件
+let raw = readFile("/etc/os-release");
 if (raw) {
-    let cfg = JSON.parse(raw);
+    log("info", raw);
 }
 ```
 
@@ -494,7 +492,6 @@ try {
 4. **错误处理**：用 try/catch 包裹可能失败的调用
 5. **配置参数化**：通过 `settings.toml` 暴露可调参数
 6. **状态放在 `module.exports` 上**：避免使用全局变量
-7. **安全第一**：沙箱不提供 `child_process`、`net`、`fs` 等模块。若需要 HTTP 通信，使用注入的 `httpGet()` / `httpPost()`；若需要文件读写，使用 `readFile()` / `writeFile()` API
 
 ### 性能注意事项
 
@@ -502,73 +499,33 @@ try {
 - 每个插件一个独立 node 进程，内存约 20-40MB
 - 建议生产环境仅加载必要的插件
 
-### Node.js 特有能力
+### Node.js 完整能力
 
-插件可以通过 `require()` 使用以下**白名单安全内置模块**：
-
-| 模块 | 用途 |
-|------|------|
-| `crypto` | 加密、哈希、随机数 |
-| `path` | 路径处理 |
-| `url` | URL 解析 |
-| `assert` | 断言测试 |
-| `buffer` | 二进制数据处理 |
-| `events` | 事件驱动 |
-| `util` | 实用工具函数 |
-| `querystring` | 查询字符串解析 |
-| `string_decoder` | 字符串解码 |
-| `zlib` | 压缩 |
-| `punycode` | Punycode 编码 |
-| `text_decoder` | 文本编码/解码 |
+本版本已解除所有模块限制，插件可使用所有 Node.js 内置模块和任意 npm 包：
 
 ```javascript
-// 在 onLoad 或异步 hook 中使用
+// 使用任意 Node.js 内置模块
+const fs = require("fs");
+const child_process = require("child_process");
+const net = require("net");
 const crypto = require("crypto");
-const path = require("path");
 
-module.exports = {
-    onLoad(config) {
-        let hash = crypto.createHash("sha256").update("data").digest("hex");
-        log("info", "SHA256: " + hash);
-    }
-};
+// 执行系统命令
+const output = child_process.execSync("ls -la").toString();
+log("info", output);
+
+// 读写任意文件
+const data = fs.readFileSync("/etc/hostname", "utf-8");
+log("info", "主机名: " + data.trim());
 ```
-
-### 已封锁的高危模块
-
-以下模块在插件沙箱中**被封锁**，无法通过 `require()` 加载：
-
-| 模块 | 原因 |
-|------|------|
-| `child_process` | 命令执行 |
-| `cluster` | 多进程控制 |
-| `net` | 网络连接 |
-| `tls` | 安全网络连接 |
-| `tty` | 终端控制 |
-| `dgram` | UDP 通信 |
-| `dns` | DNS 查询 |
-| `vm` | 沙箱逃逸 |
-| `worker_threads` | 线程执行 |
-| `module` | 模块系统操纵 |
-| `v8` | V8 引擎访问 |
-| `natives` / `native_module` | V8 内部 API |
-| `process` | 进程控制 |
-
-> **注意**：`fs` 模块在沙箱中被移除。请使用内置的 `readFile()`、`writeFile()`、`fileExists()` API，
-> 这些 API 自动将路径限制在 `plugins/data/<插件名>/` 目录下，并阻止路径穿越攻击。
-> 同时 `http` 和 `https` 模块不在白名单内，应使用注入的 `httpGet()` / `httpPost()` API 发起 HTTP 请求。
 
 ### npm 第三方包
 
-沙箱允许加载 `node_modules` 目录中的 npm 包，但同样受模块白名单限制。
-如果第三方包依赖被封锁的模块（如 `child_process`），该包将被阻止加载并抛出安全异常。
+可使用任意 npm 包，无任何限制。
 
 ```javascript
-// 允许：安全的 npm 包
 const lodash = require("lodash");
-
-// 阻止：依赖 child_process 的包
-// require("some-malicious-package");  // 抛出 [安全] 模块错误
+const axios = require("axios");
 ```
 
 ---
@@ -588,46 +545,7 @@ const lodash = require("lodash");
 
 ---
 
-## 13. 安全注意事项
-
-### 沙箱执行
-
-插件代码在 `vm.createContext` 创建的独立 V8 上下文中执行。该沙箱：
-
-- 不提供 `require` 对 `child_process`、`net`、`fs`、`vm`、`worker_threads` 等高危模块的访问
-- 不提供 `globalThis.constructor.constructor('return this')()` 等沙箱逃逸路径（代码以 `vm.Script.runInContext` 运行，`Function` 构造函数被沙箱替代）
-- 设置 5 秒执行超时，防止死循环
-- `eval()` 在沙箱上下文中受限于该上下文范围
-
-### 常见安全误区
-
-| ❌ 错误做法 | ✅ 正确做法 |
-|-----------|-----------|
-| `require("child_process").execSync("rm -rf /")` | 被封锁，抛出安全异常 |
-| `require("fs").writeFileSync("/etc/passwd", "...")` | 被封锁，使用 `writeFile()` 代替 |
-| `require("http").get(...)` | 被封锁，使用 `httpGet()` 代替 |
-| `new Function('return process')()` | 在沙箱中 `Function` 受限，无法逃逸 |
-| 直接在插件代码中拼接用户输入到 `require()` | 可能泄露路径信息，应使用固定模块名 |
-
-### 文件 I/O
-
-内置的 `readFile()`、`writeFile()`、`fileExists()` 会：
-
-1. 将相对路径拼接到 `plugins/data/<插件名>/` 目录下
-2. 使用 `path.relative()` + 检查 `..` 前缀来阻止路径穿越
-3. 自动创建数据目录（如果不存在）
-
-### HTTP 请求
-
-注入的 `httpGet()` / `httpPost()`：
-
-- 使用 Node.js 内置 `http`/`https` 模块（在宿主编程中，不在沙箱中暴露这两个模块）
-- 默认 30 秒超时，可通过 `options.timeout` 调整
-- 不暴露底层 `http.Agent` 或 `net.Socket` 等危险对象
-
----
-
-## 14. 通信协议
+## 13. 通信协议
 
 C++ 主程序与 Node.js 子进程通过 stdin/stdout JSON 行协议通信。
 

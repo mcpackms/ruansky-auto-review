@@ -136,7 +136,7 @@ private:
     // Returns parsed JSON response or nullptr on failure
     nlohmann::json send_command_sync(PluginInstance* inst,
                                      const nlohmann::json& cmd,
-                                     int timeout_ms = 5000);
+                                     int timeout_ms = 300000);
 
     // Send JSON command without waiting (async)
     void send_command_async(PluginInstance* inst, const nlohmann::json& cmd);
