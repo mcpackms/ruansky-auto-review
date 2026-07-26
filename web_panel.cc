@@ -94,7 +94,7 @@ void run_web_server(int port, const std::string& static_dir, const std::string& 
         j["uptime"] = static_cast<int>(time(nullptr) - g_web_start_time);
         j["mode"] = mode_to_string();
         j["theme"] = theme_to_string(g_theme);
-        j["version"] = "1.5.0";
+        j["version"] = "1.3.3";
         j["started_at"] = g_web_start_time;
 
         // 配置摘要

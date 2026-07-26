@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>high_bot · 自动审核</title>
+<title>high_bot · 日志</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{font-size:14px}
 body{
   font-family:-apple-system,"SF Pro Display","Geist Sans","Helvetica Neue","PingFang SC","Microsoft YaHei",sans-serif;
   background:#F7F6F3;color:#2F3437;
-  min-height:100dvh;display:flex;flex-direction:column;
+  height:100dvh;display:flex;flex-direction:column;
   -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale
 }
 @media(prefers-color-scheme:dark){
@@ -45,132 +45,19 @@ h1,h2,h3,h4{font-weight:500;letter-spacing:-0.02em;color:#111}
 @media(prefers-color-scheme:dark){.header-status .status-text{color:#A8A7A2}}
 .header-right{display:flex;align-items:center;gap:14px;font-size:0.75rem;color:#A8A7A2}
 @media(prefers-color-scheme:dark){.header-right{color:#6A6B6E}}
-.header-right button,.header-right .lang-btn{
+.header-right button{
   background:none;border:1px solid #EAEAEA;color:#2F3437;
   padding:3px 10px;border-radius:4px;cursor:pointer;font-size:0.6875rem;
   font-family:inherit;transition:all 0.15s
 }
 .header-right button:hover{background:#EDF3EC;border-color:#C8CCC6}
 @media(prefers-color-scheme:dark){
-  .header-right button,.header-right .lang-btn{border-color:#2C2D30;color:#D1D0CB}
+  .header-right button{border-color:#2C2D30;color:#D1D0CB}
   .header-right button:hover{background:#2C2D30;border-color:#4A4B4E}
 }
 .header-right button.active{background:#EDF3EC;border-color:#346538;color:#346538}
 @media(prefers-color-scheme:dark){.header-right button.active{background:#1C2D20;border-color:#346538;color:#9ECE6A}}
-.header-right .lang-btn{text-transform:uppercase;letter-spacing:0.04em;padding:3px 8px;min-width:36px;text-align:center}
-.lang-btn.active{background:#2F3437;border-color:#2F3437;color:#FFF;font-weight:500}
-@media(prefers-color-scheme:dark){.lang-btn.active{background:#EEE;border-color:#EEE;color:#1A1B1E}}
-.stats-grid{
-  display:grid;grid-template-columns:repeat(5,1fr);gap:1px;
-  border-bottom:1px solid #EAEAEA;flex-shrink:0
-}
-@media(prefers-color-scheme:dark){.stats-grid{border-bottom-color:#2C2D30}}
-.stat-cell{padding:18px 24px;background:#FFF;border-right:1px solid #EAEAEA}
-.stat-cell:last-child{border-right:none}
-@media(prefers-color-scheme:dark){.stat-cell{background:#1F2023;border-right-color:#2C2D30}}
-.stat-cell .stat-value{font-size:1.5rem;font-weight:500;letter-spacing:-0.03em;color:#111;line-height:1.2}
-@media(prefers-color-scheme:dark){.stat-cell .stat-value{color:#EEE}}
-.stat-cell .stat-sub{font-size:0.75rem;color:#A8A7A2;margin-top:3px}
-.stat-cell .stat-sub em{font-style:normal;color:#2F3437}
-@media(prefers-color-scheme:dark){.stat-cell .stat-sub em{color:#D1D0CB}}
-.main{flex:1;padding:20px 28px;display:flex;flex-direction:column;gap:20px;overflow:hidden;min-height:0}
-.section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
-.section-head h2{font-size:0.9375rem;font-weight:500}
-.section-head .count{font-size:0.75rem;color:#A8A7A2;font-weight:400}
-.section-head .count em{font-style:normal;color:#2F3437}
-@media(prefers-color-scheme:dark){.section-head .count em{color:#D1D0CB}}
-.table-scroll{overflow:auto;border:1px solid #EAEAEA;border-radius:8px;background:#FFF;
-  background:
-    linear-gradient(to right, #FFF 30%, transparent),
-    linear-gradient(to left, #FFF 30%, transparent) 100% 0,
-    radial-gradient(farthest-side at 0 50%, rgba(0,0,0,.08), transparent),
-    radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,.08), transparent);
-  background-repeat:no-repeat;
-  background-attachment:local, local, scroll, scroll;
-  background-size:40px 100%, 40px 100%, 14px 100%, 14px 100%;
-}
-@media(prefers-color-scheme:dark){
-  .table-scroll{border-color:#2C2D30;background:#1F2023;
-    background:
-      linear-gradient(to right, #1F2023 30%, transparent),
-      linear-gradient(to left, #1F2023 30%, transparent) 100% 0,
-      radial-gradient(farthest-side at 0 50%, rgba(255,255,255,.06), transparent),
-      radial-gradient(farthest-side at 100% 50%, rgba(255,255,255,.06), transparent);
-    background-repeat:no-repeat;
-    background-attachment:local, local, scroll, scroll;
-    background-size:40px 100%, 40px 100%, 14px 100%, 14px 100%;
-  }
-}
-.family-table{width:100%;border-collapse:collapse;font-size:0.8125rem}
-.family-table thead th{
-  position:sticky;top:0;z-index:1;
-  background:#F9F9F8;padding:8px 14px;text-align:left;
-  font-family:"SF Mono","Geist Mono",monospace;
-  font-size:0.6875rem;letter-spacing:0.03em;text-transform:uppercase;
-  color:#A8A7A2;font-weight:400;
-  border-bottom:1px solid #EAEAEA
-}
-@media(prefers-color-scheme:dark){
-  .family-table thead th{background:#1A1B1E;border-bottom-color:#2C2D30;color:#6A6B6E}
-}
-.family-table tbody td{padding:8px 14px;border-bottom:1px solid #F3F2F0;white-space:nowrap}
-@media(prefers-color-scheme:dark){.family-table tbody td{border-bottom-color:#26272A}}
-.family-table tbody tr{cursor:pointer;transition:background 0.1s}
-.family-table tbody tr:hover{background:#F9F9F8}
-@media(prefers-color-scheme:dark){.family-table tbody tr:hover{background:#26272A}}
-.family-table tbody tr.selected{background:#EDF3EC}
-@media(prefers-color-scheme:dark){.family-table tbody tr.selected{background:#1C2D20}}
-.family-table .col-id{font-family:"SF Mono","Geist Mono",monospace;color:#1F6C9F;font-weight:500}
-.family-table .col-token{color:#A8A7A2;font-family:"SF Mono","Geist Mono",monospace}
-.family-table .col-stat{font-family:"SF Mono","Geist Mono",monospace;text-align:right;min-width:80px}
-.family-table .col-stat .approved{color:#346538}
-.family-table .col-stat .rejected{color:#9F2F2D}
-@media(prefers-color-scheme:dark){.family-table .col-stat .approved{color:#9ECE6A}}
-@media(prefers-color-scheme:dark){.family-table .col-stat .rejected{color:#F7768E}}
-.family-table .col-rate{font-family:"SF Mono","Geist Mono",monospace;text-align:right;min-width:48px}
-.family-table .col-rate .high{color:#346538}
-.family-table .col-rate .mid{color:#956400}
-.family-table .col-rate .low{color:#9F2F2D}
-@media(prefers-color-scheme:dark){.family-table .col-rate .high{color:#9ECE6A}}
-@media(prefers-color-scheme:dark){.family-table .col-rate .mid{color:#E0AF68}}
-@media(prefers-color-scheme:dark){.family-table .col-rate .low{color:#F7768E}}
-.family-table .col-status{min-width:60px;text-align:center}
-.status-tag{
-  display:inline-block;padding:1px 8px;border-radius:9999px;
-  font-family:"SF Mono","Geist Mono",monospace;
-  font-size:0.6875rem;letter-spacing:0.04em;text-transform:uppercase
-}
-.status-tag.running{background:#EDF3EC;color:#346538}
-.status-tag.paused{background:#FDEBEC;color:#9F2F2D}
-@media(prefers-color-scheme:dark){.status-tag.running{background:#1C2D20;color:#9ECE6A}}
-@media(prefers-color-scheme:dark){.status-tag.paused{background:#301B1F;color:#F7768E}}
-.table-empty{text-align:center;padding:40px 20px;color:#A8A7A2;font-size:0.8125rem}
-.detail-card{
-  border:1px solid #EAEAEA;border-radius:8px;padding:16px 20px;background:#FFF;
-  flex-shrink:0
-}
-@media(prefers-color-scheme:dark){.detail-card{border-color:#2C2D30;background:#1F2023}}
-.detail-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
-.detail-title{font-size:0.875rem;font-weight:500;color:#111}
-.detail-title .fid{color:#1F6C9F}
-@media(prefers-color-scheme:dark){.detail-title{color:#EEE}}
-.detail-meta{font-size:0.75rem;color:#A8A7A2;display:flex;gap:14px;flex-wrap:wrap}
-.detail-modules{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
-.mod-tag{
-  padding:2px 8px;border-radius:4px;font-size:0.6875rem;
-  font-family:"SF Mono","Geist Mono",monospace;
-  letter-spacing:0.02em;background:#F3F2F0;color:#A8A7A2
-}
-.mod-tag.on{background:#EDF3EC;color:#346538}
-.mod-tag.off{background:#F3F2F0;color:#A8A7A2}
-@media(prefers-color-scheme:dark){.mod-tag{background:#2C2D30;color:#6A6B6E}}
-@media(prefers-color-scheme:dark){.mod-tag.on{background:#1C2D20;color:#9ECE6A}}
-.detail-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
-.detail-stat{font-size:0.75rem;color:#A8A7A2}
-.detail-stat .num{font-size:1rem;font-weight:500;color:#111;font-family:"SF Mono","Geist Mono",monospace}
-@media(prefers-color-scheme:dark){.detail-stat .num{color:#EEE}}
-.detail-stat .s-rate{font-size:0.6875rem}
-.detail-empty{color:#A8A7A2;font-size:0.8125rem;padding:6px 0}
+.main{flex:1;padding:16px 28px;display:flex;flex-direction:column;overflow:hidden;min-height:0}
 .log-card{
   border:1px solid #EAEAEA;border-radius:8px;background:#FFF;
   display:flex;flex-direction:column;overflow:hidden;flex:1;min-height:0
@@ -183,6 +70,7 @@ h1,h2,h3,h4{font-weight:500;letter-spacing:-0.02em;color:#111}
 @media(prefers-color-scheme:dark){.log-header{border-bottom-color:#26272A}}
 .log-header .log-title{font-size:0.8125rem;font-weight:500;color:#111}
 @media(prefers-color-scheme:dark){.log-header .log-title{color:#EEE}}
+.log-header .log-info{font-size:0.6875rem;color:#A8A7A2;font-family:"SF Mono","Geist Mono",monospace}
 .log-header .log-actions{display:flex;gap:6px}
 .log-header .log-actions button{
   background:none;border:1px solid #EAEAEA;color:#A8A7A2;
@@ -212,56 +100,19 @@ h1,h2,h3,h4{font-weight:500;letter-spacing:-0.02em;color:#111}
 @media(prefers-color-scheme:dark){.log-entry.log-err{color:#F7768E}}
 @media(prefers-color-scheme:dark){.log-entry.log-info{color:#D1D0CB}}
 .log-empty{text-align:center;padding:30px;color:#A8A7A2;font-size:0.8125rem}
-.icon{display:inline-block;vertical-align:middle;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.8}
-.icon-sm{width:14px;height:14px}
-.icon-xs{width:12px;height:12px}
-.dot-indicator{display:inline-block;width:7px;height:7px;border-radius:50%}
-.dot-indicator.on{background:#346538}
-.dot-indicator.off{background:#A8A7A2}
-.dot-indicator.err{background:#9F2F2D}
-@media(prefers-color-scheme:dark){.dot-indicator.on{background:#9ECE6A}}
-@media(max-width:900px){
-  .stats-grid{grid-template-columns:repeat(3,1fr)}
-  .detail-stats{grid-template-columns:repeat(3,1fr)}
-  .family-table{font-size:0.75rem}
-  .header{padding:0 16px}
-  .main{padding:16px}
-  .stat-cell{padding:14px 16px}
-}
 @media(max-width:768px){
-  .stats-grid{grid-template-columns:repeat(2,1fr)}
-  .family-table .col-token{display:none}
-  .family-table .col-rate{display:none}
-  .family-table .col-stat{min-width:65px}
+  .header{padding:0 16px}
+  .main{padding:12px 16px}
 }
 @media(max-width:600px){
-  .stats-grid{grid-template-columns:1fr}
-  .stat-cell{border-right:none}
-  .detail-stats{grid-template-columns:repeat(2,1fr)}
-  .header-right .uptime{display:none}
   .header-left .header-logo{display:none}
-  .family-table .col-id{display:none}
-  .family-table .col-stat{min-width:55px}
-  .family-table tbody td{padding:8px 6px}
-  .family-table thead th{padding:8px 6px}
-  .table-scroll{border-radius:6px}
-  .detail-card{padding:12px}
-  .detail-header{flex-direction:column;align-items:flex-start;gap:6px}
+  .header-right .uptime{display:none}
 }
 @media(max-width:480px){
   .header-left .header-status .status-text{display:none}
-  .header-right .lang-btn{min-width:30px;padding:2px 6px;font-size:0.625rem}
-  .family-table .col-stat{min-width:48px;font-size:0.6875rem}
-  .family-table .col-status{min-width:40px}
-  .family-table tbody td{padding:6px 4px}
-  .family-table thead th{padding:6px 4px;font-size:0.625rem}
-  .main{padding:10px;gap:12px}
-  .stat-cell{padding:10px 12px}
-  .stat-cell .stat-value{font-size:1.25rem}
-  .section-head{flex-direction:column;align-items:flex-start;gap:4px}
+  .main{padding:8px 10px}
+  .log-entry{padding:1px 10px;font-size:0.6875rem}
 }
-
-
 </style>
 </head>
 <body>
@@ -271,189 +122,43 @@ h1,h2,h3,h4{font-weight:500;letter-spacing:-0.02em;color:#111}
     <span class="header-logo">high_bot</span>
     <span class="header-status" id="headerStatus">
       <span class="dot" id="statusDot"></span>
-      <span class="status-text" id="statusText" data-i="statusCheck">Checking</span>
+      <span class="status-text" id="statusText">检测中</span>
     </span>
   </div>
   <div class="header-right">
-    <button class="lang-btn" id="langEn" onclick="setLang('en')">EN</button>
-    <button class="lang-btn" id="langZh" onclick="setLang('zh')">中文</button>
-    <span id="versionText">v1.5.0</span>
     <span class="uptime" id="uptimeText">--</span>
-    <button onclick="forceRefresh()" data-i="refresh">Refresh</button>
-    <button id="autoRefreshBtn" onclick="toggleAutoRefresh()">3s auto</button>
+    <button id="autoRefreshBtn" onclick="toggleAutoRefresh()">3s 刷新</button>
   </div>
 </header>
 
-<div class="stats-grid">
-  <div class="stat-cell">
-    <div class="stat-value" id="statFamilies">-</div>
-    <div class="stat-sub" data-i="statFamilies">families online <em id="statOnline">-</em> / <em id="statTotal">-</em></div>
-  </div>
-  <div class="stat-cell">
-    <div class="stat-value" id="statConcurrency">-</div>
-    <div class="stat-sub" data-i="statConcurrency">concurrency &middot; <em id="statDelay">-</em> ms delay</div>
-  </div>
-  <div class="stat-cell">
-    <div class="stat-value" id="statInterval">-</div>
-    <div class="stat-sub" data-i="statInterval">check interval &middot; regex <em id="statRegex">-</em></div>
-  </div>
-  <div class="stat-cell">
-    <div class="stat-value" id="statBadWords">-</div>
-    <div class="stat-sub" data-i="statBadWords">bad words <em id="statBadWordsEnabled">-</em> / patterns <em id="statRegexCount">-</em></div>
-  </div>
-  <div class="stat-cell">
-    <div class="stat-value" id="statMaxCoin">-</div>
-    <div class="stat-sub" data-i="statMaxCoin">max coin <em id="statUpResource">-</em></div>
-  </div>
-</div>
-
 <div class="main">
-  <div style="min-height:0;display:flex;flex-direction:column;overflow:hidden;">
-    <div class="section-head">
-      <h2 data-i="titleFamilies">Families</h2>
-      <span class="count"><em id="tblOnline">0</em> / <span id="tblTotal">0</span> <span data-i="online">online</span></span>
-    </div>
-    <div class="table-scroll" id="familyTableWrap">
-      <table class="family-table">
-        <thead><tr>
-          <th class="col-id" data-i="thId">ID</th>
-          <th class="col-token" data-i="thToken">Token</th>
-          <th class="col-stat" data-i="thPosts">Posts</th>
-          <th class="col-stat" data-i="thComments">Comments</th>
-          <th class="col-stat" data-i="thJoins">Joins</th>
-          <th class="col-stat" data-i="thUp">UP</th>
-          <th class="col-stat" data-i="thUpResource">UP Res</th>
-          <th class="col-rate" data-i="thRate">Rate</th>
-          <th class="col-status" data-i="thStatus">Status</th>
-        </tr></thead>
-        <tbody id="familyTbody">
-          <tr><td colspan="9" class="table-empty" data-i="loading">Loading...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="detail-card" id="detailPanel">
-    <div class="detail-empty" id="detailEmpty" data-i="selectHint">Select a family to inspect</div>
-    <div id="detailContent" style="display:none;">
-      <div class="detail-header">
-        <div class="detail-title"><span data-i="family">Family</span> <span class="fid" id="detailFid">-</span></div>
-        <div class="detail-meta">
-          <span><span data-i="token">Token</span>: <span id="detailToken">-</span></span>
-          <span>UID: <span id="detailUid">-</span></span>
-          <span id="detailLastActivity"><span data-i="last">Last</span>: --</span>
-          <span><span data-i="dUpResourceCoin">UP Res Max Coin</span>: <span id="detailUpResCoin">-</span></span>
-        </div>
-      </div>
-      <div class="detail-modules" id="detailModules"></div>
-      <div class="detail-stats">
-        <div class="detail-stat"><div data-i="dPosts">Posts</div><div class="num" id="dPostTotal">-</div><span class="s-rate" id="dPostRate">-</span></div>
-        <div class="detail-stat"><div data-i="dComments">Comments</div><div class="num" id="dCommentTotal">-</div><span class="s-rate" id="dCommentRate">-</span></div>
-        <div class="detail-stat"><div data-i="dJoins">Joins</div><div class="num" id="dJoinTotal">-</div><span class="s-rate" id="dJoinRate">-</span></div>
-        <div class="detail-stat"><div data-i="dUp">UP</div><div class="num" id="dUpTotal">-</div><span class="s-rate" id="dUpRate">-</span></div>
-        <div class="detail-stat"><div data-i="dUpResource">UP Resource</div><div class="num" id="dUpResourceTotal">-</div><span class="s-rate" id="dUpResourceRate">-</span></div>
-      </div>
-    </div>
-  </div>
-
   <div class="log-card">
     <div class="log-header">
-      <div class="log-title" data-i="logTitle">Log</div>
+      <div>
+        <span class="log-title">日志</span>
+        <span class="log-info" id="logCount">0 条</span>
+      </div>
       <div class="log-actions">
-        <button onclick="toggleLogPause()" id="logPauseBtn" data-i="pause">Pause</button>
-        <button onclick="clearLog()" data-i="clear">Clear</button>
+        <button onclick="toggleLogPause()" id="logPauseBtn">暂停</button>
+        <button onclick="clearLog()">清空</button>
       </div>
     </div>
     <div class="log-body" id="logBody">
-      <div class="log-empty" data-i="logEmpty">Awaiting log output...</div>
+      <div class="log-empty">等待日志输出...</div>
     </div>
   </div>
 </div>
 
 <script>
-// ===== I18N =====
-var I18N={
-  en:{
-    statusCheck:'Checking',statusRunning:'Running',statusStopped:'Stopped',
-    statFamilies:'families online',statConcurrency:'concurrency &#183;',statInterval:'check interval &#183; regex',statBadWords:'bad words',statMaxCoin:'max coin',
-    titleFamilies:'Families',online:'online',
-    thId:'ID',thToken:'Token',thPosts:'Posts',thComments:'Comments',thJoins:'Joins',thUp:'UP',thUpResource:'UP Res',thRate:'Rate',thStatus:'Status',
-    loading:'Loading...',
-    selectHint:'Select a family to inspect',
-    family:'Family',token:'Token',last:'Last',
-    dPosts:'Posts',dComments:'Comments',dJoins:'Joins',dUp:'UP',dUpResource:'UP Resource',dUpResourceCoin:'UP Max Coin',
-    logTitle:'Log',pause:'Pause',resume:'Resume',clear:'Clear',
-    logEmpty:'Awaiting log output...',logCleared:'Log cleared',
-    refresh:'Refresh',
-    running:'Running',paused:'Paused',
-    never:'never','just now':'just now',
-    up:'up'
-  },
-  zh:{
-    statusCheck:'检测中',statusRunning:'运行中',statusStopped:'已停止',
-    statFamilies:'家族在线',statConcurrency:'并发 &#183;',statInterval:'检查间隔 &#183; 正则',statBadWords:'违禁词',statMaxCoin:'最大金币',
-    titleFamilies:'家族列表',online:'在线',
-    thId:'ID',thToken:'令牌',thPosts:'帖子',thComments:'评论',thJoins:'加入',thUp:'UP',thUpResource:'UP资源',thRate:'通过率',thStatus:'状态',
-    loading:'加载中...',
-    selectHint:'选择一个家族查看详情',
-    family:'家族',token:'令牌',last:'最近活动',
-    dPosts:'帖子',dComments:'评论',dJoins:'加入',dUp:'UP',dUpResource:'UP资源',dUpResourceCoin:'UP最大金币',
-    logTitle:'日志',pause:'暂停',resume:'继续',clear:'清空',
-    logEmpty:'等待日志输出...',logCleared:'日志已清空',
-    refresh:'刷新',
-    running:'运行中',paused:'已暂停',
-    never:'从未','just now':'刚刚',
-    up:'已运行'
-  }
-};
-var lang=localStorage.getItem('hl')||'zh';
-function tr(k){var m=I18N[lang];return m&&m[k]!==undefined?m[k]:k}
-function applyLang(){
-  var els=document.querySelectorAll('[data-i]');
-  for(var i=0;i<els.length;i++){
-    var k=els[i].getAttribute('data-i');
-    els[i].innerHTML=tr(k);
-  }
-  document.getElementById('langEn').classList.toggle('active',lang==='en');
-  document.getElementById('langZh').classList.toggle('active',lang==='zh');
-  document.getElementById('logPauseBtn').textContent=logPaused?tr('resume'):tr('pause');
-  document.getElementById('autoRefreshBtn').textContent=autoRefresh?('3s '+tr('refresh')):tr('refresh');
-  // refresh status text
-  var txt=document.getElementById('statusText');
-  if(txt.textContent==='Running'||txt.textContent==='运行中')txt.textContent=tr('statusRunning');
-  else if(txt.textContent==='Stopped'||txt.textContent==='已停止')txt.textContent=tr('statusStopped');
-  else txt.textContent=tr('statusCheck');
-  // update detail module labels
-  for(var mi=0;mi<modulesLabelList.length;mi++){
-    var k=modulesLabelList[mi].k;
-    modulesLabelList[mi].l=tr(k==='post'?'dPosts':k==='comment'?'dComments':k==='join'?'dJoins':k==='up'?'dUp':'dUpResource');
-  }
-}
-function setLang(l){lang=l;localStorage.setItem('hl',l);applyLang()}
+var autoRefresh=true,refreshInterval=3000,refreshTimer=null,logPaused=false,lastLogCount=0,firstLoad=true;
 
-// ===== Core =====
-var families=[],selectedFid='',autoRefresh=true,refreshInterval=3000,refreshTimer=null,logPaused=false,lastLogCount=0,firstLoad=true;
-var modulesLabelList=[{k:'post',l:'Posts'},{k:'comment',l:'Comments'},{k:'join',l:'Joins'},{k:'up',l:'UP'},{k:'up_resource',l:'UP Resource'}];
+function escapeHtml(t){var d=document.createElement('div');d.textContent=t;return d.innerHTML}
 
-function fmtStat(t,a,r){return(t||0)+'/'+(a||0)+'/'+(r||0)}
-function fmtRate(a,t){return t<=0?'--':Math.round(a*100/t)+'%'}
-function rc(r){return r>=90?'high':r>=50?'mid':'low'}
-function timeAgo(ts){
-  if(!ts||ts<=0)return tr('never');
-  var d=Math.floor(Date.now()/1000)-ts;
-  if(d<10)return tr('just now');
-  if(d<60)return d+'s ago';
-  if(d<3600)return Math.floor(d/60)+'m ago';
-  var t=new Date(ts*1e3);
-  return String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')+':'+String(t.getSeconds()).padStart(2,'0');
-}
-function fmtUptime(s){var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),s2=s%60;return h>0?h+'h '+m+'m':m>0?m+'m '+s2+'s':s2+'s'}
 function getLogCls(msg){
   if(msg.indexOf('[ERROR]')!==-1)return'log-err';
   if(msg.indexOf('through')!==-1||msg.indexOf('approve')!==-1||msg.indexOf('reject')!==-1)return'log-ok';
   return'log-info';
 }
-function escapeHtml(t){var d=document.createElement('div');d.textContent=t;return d.innerHTML}
 
 function appendLogs(logs){
   var body=document.getElementById('logBody');
@@ -466,16 +171,18 @@ function appendLogs(logs){
     e.innerHTML='<span class="t">'+t+'</span>'+escapeHtml(msg);
     body.appendChild(e);
   }
+  document.getElementById('logCount').textContent=logs.length+' 条';
   if(!logPaused)body.scrollTop=body.scrollHeight;
 }
 
 function toggleLogPause(){
   logPaused=!logPaused;
-  document.getElementById('logPauseBtn').textContent=logPaused?tr('resume'):tr('pause');
+  document.getElementById('logPauseBtn').textContent=logPaused?'继续':'暂停';
   document.getElementById('logPauseBtn').classList.toggle('active',logPaused);
   if(!logPaused){var b=document.getElementById('logBody');b.scrollTop=b.scrollHeight}
 }
-function clearLog(){document.getElementById('logBody').innerHTML='<div class="log-empty">'+tr('logCleared')+'</div>';lastLogCount=0}
+
+function clearLog(){document.getElementById('logBody').innerHTML='<div class="log-empty">日志已清空</div>';lastLogCount=0;document.getElementById('logCount').textContent='0 条'}
 
 async function fetchJSON(url){
   try{
@@ -489,119 +196,19 @@ async function loadStatus(){
   var d=await fetchJSON('/api/status');
   if(!d)return;
   var s=document.getElementById('headerStatus'),dot=document.getElementById('statusDot'),txt=document.getElementById('statusText');
-  if(d.running){s.className='header-status';dot.className='dot';txt.textContent=tr('statusRunning')}
-  else{s.className='header-status paused';dot.className='dot';txt.textContent=tr('statusStopped')}
-  document.getElementById('versionText').textContent='v'+(d.version||'1.5.0');
-  document.getElementById('uptimeText').textContent=tr('up')+' '+fmtUptime(d.uptime||0);
-  var c=d.config||{};
-  document.getElementById('statFamilies').textContent=(d.families_online||0)+' / '+(d.families_total||0);
-  document.getElementById('statOnline').textContent=d.families_online||0;
-  document.getElementById('statTotal').textContent=d.families_total||0;
-  document.getElementById('statConcurrency').textContent=c.concurrency||'-';
-  document.getElementById('statDelay').textContent=c.request_delay_ms||'-';
-  document.getElementById('statInterval').textContent=c.check_interval_seconds||'-';
-  document.getElementById('statRegex').textContent=c.enable_regex?tr('statusRunning'):'off';
-  document.getElementById('statMaxCoin').textContent=c.max_up_resource_coin>=0?c.max_up_resource_coin:'∞';
-  document.getElementById('statUpResource').textContent=c.up_resource_enabled?tr('running'):'off';
-  var bc=c.bad_words_count||0,rc2=c.regex_patterns_count||0;
-  document.getElementById('statBadWords').textContent=bc+' / '+rc2;
-  document.getElementById('statBadWordsEnabled').textContent=c.bad_words_enabled?tr('statusRunning'):'off';
-  document.getElementById('statRegexCount').textContent=rc2;
+  if(d.running){s.className='header-status';dot.className='dot';txt.textContent='运行中'}
+  else{s.className='header-status paused';dot.className='dot';txt.textContent='已停止'}
+  document.getElementById('uptimeText').textContent='已运行 '+(d.uptime?fmtUptime(d.uptime):'--');
 }
 
-function addStatCol(s,st){
-  return '<span class="approved">'+(st.approved||0)+'</span>/<span class="rejected">'+(st.rejected||0)+'</span>/'+(st.total||0);
-}
-
-async function loadFamilies(){
-  var d=await fetchJSON('/api/families');
-  if(!d)return;
-  families=d;
-  var tbody=document.getElementById('familyTbody'),online=0;
-  if(!d.length){
-    tbody.innerHTML='<tr><td colspan="9" class="table-empty">'+(lang==='zh'?'未配置家族':'No families configured')+'</td></tr>';
-    document.getElementById('tblOnline').textContent='0';document.getElementById('tblTotal').textContent='0';return;
-  }
-  var html='';
-  for(var i=0;i<d.length;i++){
-    var f=d[i],p=f.paused,st=f.stats||{};
-    var sp=st.post||{total:0,approved:0,rejected:0};
-    var sc=st.comment||{total:0,approved:0,rejected:0};
-    var sj=st.join||{total:0,approved:0,rejected:0};
-    var su=st.up||{total:0,approved:0,rejected:0};
-    var sur=st.up_resource||{total:0,approved:0,rejected:0};
-    var tt=sp.total+sc.total+sj.total+su.total+sur.total;
-    var ta=sp.approved+sc.approved+sj.approved+su.approved+sur.approved;
-    var rv=tt>0?Math.round(ta*100/tt):-1;
-    if(!p)online++;
-    var sel=f.family_id===selectedFid?' selected':'';
-    html+='<tr class="'+sel+'" onclick="selectFamily(\''+f.family_id+'\')">';
-    html+='<td class="col-id">'+(f.family_id||'--')+'</td>';
-    html+='<td class="col-token">'+(f.token_mask||'--')+'</td>';
-    html+='<td class="col-stat">'+addStatCol('post',sp)+'</td>';
-    html+='<td class="col-stat">'+addStatCol('comment',sc)+'</td>';
-    html+='<td class="col-stat">'+addStatCol('join',sj)+'</td>';
-    html+='<td class="col-stat">'+addStatCol('up',su)+'</td>';
-    html+='<td class="col-stat">'+addStatCol('up_resource',sur)+'</td>';
-    html+='<td class="col-rate"><span class="'+(rv>=0?rc(rv):'')+'">'+fmtRate(ta,tt)+'</span></td>';
-    html+='<td class="col-status">'+(p?'<span class="status-tag paused">'+tr('paused')+'</span>':'<span class="status-tag running">'+tr('running')+'</span>')+'</td></tr>';
-  }
-  tbody.innerHTML=html;
-  document.getElementById('tblOnline').textContent=online;
-  document.getElementById('tblTotal').textContent=d.length;
-  if(selectedFid)updateDetail(selectedFid);
-  else if(d.length>0)selectFamily(d[0].family_id);
-}
-
-function selectFamily(fid){
-  selectedFid=fid;updateDetail(fid);
-  var rows=document.querySelectorAll('#familyTbody tr');
-  for(var i=0;i<rows.length;i++){
-    var o=rows[i].getAttribute('onclick');
-    rows[i].classList.toggle('selected',o&&o.indexOf("'"+fid+"'")!==-1);
-  }
-}
-
-function updateDetail(fid){
-  for(var i=0;i<families.length;i++){
-    if(families[i].family_id===fid){
-      var f=families[i],st=f.stats||{};
-      var sp=st.post||{total:0,approved:0,rejected:0};
-      var sc=st.comment||{total:0,approved:0,rejected:0};
-      var sj=st.join||{total:0,approved:0,rejected:0};
-      var su=st.up||{total:0,approved:0,rejected:0};
-      var sur=st.up_resource||{total:0,approved:0,rejected:0};
-      document.getElementById('detailEmpty').style.display='none';
-      document.getElementById('detailContent').style.display='block';
-      document.getElementById('detailFid').textContent=f.family_id||'--';
-      document.getElementById('detailToken').textContent=f.token_mask||'--';
-      document.getElementById('detailUid').textContent=f.uid||'--';
-      document.getElementById('detailLastActivity').innerHTML='<span data-i="last">'+tr('last')+'</span>: '+timeAgo(f.last_activity);
-      var m=f.modules||{},mh='',ml=modulesLabelList;
-      for(var mi=0;mi<ml.length;mi++){var on=m[ml[mi].k];mh+='<span class="mod-tag '+(on?'on':'off')+'">'+ml[mi].l+' '+(on?'on':'off')+'</span>'}
-      document.getElementById('detailModules').innerHTML=mh;
-      document.getElementById('dPostTotal').textContent=fmtStat(sp.total,sp.approved,sp.rejected);
-      document.getElementById('dPostRate').textContent=fmtRate(sp.approved,sp.total);
-      document.getElementById('dCommentTotal').textContent=fmtStat(sc.total,sc.approved,sc.rejected);
-      document.getElementById('dCommentRate').textContent=fmtRate(sc.approved,sc.total);
-      document.getElementById('dJoinTotal').textContent=fmtStat(sj.total,sj.approved,sj.rejected);
-      document.getElementById('dJoinRate').textContent=fmtRate(sj.approved,sj.total);
-      document.getElementById('dUpTotal').textContent=fmtStat(su.total,su.approved,su.rejected);
-      document.getElementById('dUpRate').textContent=fmtRate(su.approved,su.total);
-      document.getElementById('dUpResourceTotal').textContent=fmtStat(sur.total,sur.approved,sur.rejected);
-      document.getElementById('dUpResourceRate').textContent=fmtRate(sur.approved,sur.total);
-      document.getElementById('detailUpResCoin').textContent=f.max_up_resource_coin>=0?f.max_up_resource_coin:'∞';
-      return;
-    }
-  }
-  document.getElementById('detailEmpty').style.display='block';
-  document.getElementById('detailContent').style.display='none';
-}
+function fmtUptime(s){var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),s2=s%60;return h>0?h+'h '+m+'m':m>0?m+'m '+s2+'s':s2+'s'}
 
 async function loadLogs(){
-  var url='/api/logs?count=100';if(selectedFid)url+='&fid='+selectedFid;
-  var d=await fetchJSON(url);if(!d)return;
+  var d=await fetchJSON('/api/logs?count=200');
+  if(!d)return;
   var logs=d.logs||[];
+  if(logs.length===0){if(firstLoad){document.getElementById('logBody').innerHTML='<div class="log-empty">暂无日志</div>';firstLoad=false}return}
+  document.getElementById('logCount').textContent=logs.length+' 条';
   if(logs.length<=lastLogCount)return;
   var newLogs=logs.slice(lastLogCount);
   lastLogCount=logs.length;
@@ -609,17 +216,16 @@ async function loadLogs(){
   appendLogs(newLogs);
 }
 
-async function refreshAll(){await Promise.all([loadStatus(),loadFamilies(),loadLogs()])}
-function forceRefresh(){refreshAll()}
+async function refreshAll(){await Promise.all([loadStatus(),loadLogs()])}
 function toggleAutoRefresh(){
   autoRefresh=!autoRefresh;
   var btn=document.getElementById('autoRefreshBtn');
-  if(autoRefresh){btn.textContent='3s '+tr('refresh');startAutoRefresh()}
-  else{btn.textContent=tr('refresh');stopAutoRefresh()}
+  if(autoRefresh){btn.textContent='3s 刷新';startAutoRefresh()}
+  else{btn.textContent='刷新';stopAutoRefresh()}
 }
 function startAutoRefresh(){stopAutoRefresh();refreshTimer=setInterval(refreshAll,refreshInterval)}
 function stopAutoRefresh(){if(refreshTimer){clearInterval(refreshTimer);refreshTimer=null}}
-applyLang();refreshAll();startAutoRefresh();
+refreshAll();startAutoRefresh();
 document.addEventListener('visibilitychange',function(){if(!document.hidden&&autoRefresh)refreshAll()});
 </script>
 </body>

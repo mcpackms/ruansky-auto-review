@@ -115,7 +115,7 @@ STATE3_REJECTED = "2"
 # ==================== JS 插件系统 ====================
 [PLUGINS]
 # 插件搜索目录列表，扫描其中所有 .js 文件并自动加载
-dirs = ["./plugins", "./plugins/examples"]
+dirs = ["./plugins"]
 
 # 手动配置单个插件（可选，覆盖自动加载的同名插件）
 # [[PLUGINS.LOAD]]
