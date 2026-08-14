@@ -463,7 +463,7 @@ struct CurlHandle {
     CURL* easy;
     CurlHandle() {
         easy = curl_easy_init();
-        curl_easy_setopt(easy, CURLOPT_TIMEOUT, 10L);
+        curl_easy_setopt(easy, CURLOPT_TIMEOUT, 3L);
         curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, 1L);
         curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 2L);
     }
@@ -482,7 +482,7 @@ public:
             auto* h = pool_.back();
             pool_.pop_back();
             curl_easy_reset(h->easy);
-            curl_easy_setopt(h->easy, CURLOPT_TIMEOUT, 10L);
+            curl_easy_setopt(h->easy, CURLOPT_TIMEOUT, 3L);
             curl_easy_setopt(h->easy, CURLOPT_SSL_VERIFYPEER, 1L);
             curl_easy_setopt(h->easy, CURLOPT_SSL_VERIFYHOST, 2L);
             return h;
@@ -723,7 +723,7 @@ struct CheckResult {
         if (idx >= 0) {
             result.should_reject = true;
             if (idx < static_cast<int>(g_bad_words.words.size())) {
-                result.reason = "违禁词:" + g_bad_words.words[idx];
+                result.reason = "违规";
             }
         }
     }
