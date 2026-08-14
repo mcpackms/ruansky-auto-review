@@ -1,15 +1,6 @@
 # ruansky_auto_review
 
-基于 Node.js 子进程 JS 插件引擎的自动内容审核机器人（无限制版）。
-
-## 安全公告
-
-> **当前版本已解除所有安全限制**，插件拥有完整的 Node.js 权限，
-> 可访问 `fs`、`child_process`、`net` 等所有内置模块，可读写任意文件路径。
-> 请自行确保只加载受信任的插件。
-> 详情见 [`plugins/README.md`](plugins/README.md)。
-
-## 依赖
+RUANAKY平台内容审核机器人
 
 ### 编译依赖
 
@@ -68,7 +59,7 @@ sudo pacman -Sy --needed \
     toml11
 ```
 
-## 运行时依赖
+## 运行时依赖（可选）
 
 插件系统依赖 **Node.js >= 18**。大部分发行版可直接安装：
 
@@ -114,3 +105,8 @@ cd build
 ### 快速开始
 
 将 `.js` 文件放入 `plugins/` 目录即可自动加载。详见 [`plugins/README.md`](plugins/README.md)。
+
+### 插件许可证说明
+本项目的插件机制通过定义良好的 API 与主程序通信。
+插件作为独立作品，其许可证由插件作者自行选择，
+不受主程序 AGPL 协议的约束。
