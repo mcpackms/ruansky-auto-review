@@ -1,48 +1,51 @@
-SIGN_CONST = "P.8CGq@Wr~Vs]!4!"
-API_LEVEL = "36"
-LIMIT = "50"
-BASE_URL = "https://rtkapi2.ruansky.net"
-CHANNEL = "rtk"
-USER_AGENT = "High_bot 1.0.0"
-VERSION = "8740"
-PHONE_MODEL = "High_bot"
-REQUEST_DELAY_MS = 10
-OS_INFO = "High_bot"
-PAGE = "1"
-ENABLE_REGEX = true
-CHECK_INTERVAL_SECONDS = 50
-CONCURRENCY = 8
-MAX_UP_RESOURCE_COIN = 3
-THEME = "tokyo-night"
+# High_bot 开源版配置文件
+# true为开启，false为关闭，-1代表不启用，制表符大小8格观看效果最佳
+# ================ 全局配置区 ===============
+SIGN_CONST = "P.8CGq@Wr~Vs]!4!" 	#	请不要动这里，除非你知道你在干什么
+API_LEVEL = "36" 			#	请不要动这里，除非你知道你在干什么
+LIMIT = "50" 				#	一次最大审核数
+BASE_URL = "https://rtkapi2.ruansky.net" # 请不要动这里，除非你知道你在干什么
+CHANNEL = "rtk" 			#	请不要动这里，除非你知道你在干什么
+USER_AGENT = "High_bot 1.0.0" 	#	可随意修改，但不能太长
+VERSION = "8740" 			#	请不要动这里，除非你知道你在干什么
+PHONE_MODEL = "High_bot" 		#	可随意修改，但不要太长
+REQUEST_DELAY_MS = 10 		#	间隔时间，建议5-20（单位ms）
+OS_INFO = "High_bot" 			#	可随意修改，但不要太长
+PAGE = "1" 				#	请不要动这里，除非你知道你在干什么
+ENABLE_REGEX = true 			#	正则开关
+CHECK_INTERVAL_SECONDS = 50 	#	审核间隔，不能低于10（单位s）
+CONCURRENCY = 8 			#	并发数，根据cpu核心数量调整，建议为核心数*2
+MAX_UP_RESOURCE_COIN = 3 		#	全局最大up资源金币数
+THEME = "tokyo-night" 		#	tui主题，可选black,white,tokyo-night
 
 [TUI]
-ENABLED = true
+ENABLED = true 			#	tui开关
 
 [WEB]
-ENABLED = true
-PORT = 2356
-BIND = "127.0.0.1"
-ROOT = "./web"
+ENABLED = true 			#	web开关
+PORT = 2356 			#	端口
+BIND = "127.0.0.1" 			#	ip地址
+ROOT = "./web" 			#	目录
 
 [[TOKENS]]
-ENABLE_BADWORDS = true
-ENABLE_REGEX = true
-UID = ""
-CONCURRENCY = 8
-REQUEST_DELAY_MS = 25
+ENABLE_BADWORDS = true 		#	违禁词开关
+ENABLE_REGEX = true 			#	正则开关
+UID = "" 				#	填入机器人的uid
+CONCURRENCY = 8 			#	并发数
+REQUEST_DELAY_MS = 25 		#	间隔（单位ms）
 TOKEN = ""
 
 [[TOKENS.FAMILIES]]
-FAMILY_ID = ""
-ENABLE_POST = true
-ENABLE_COMMENT = true
-ENABLE_JOIN = false
-MID = ""
-ENABLE_UP = true
-ENABLE_UP_RESOURCE = false
-MAX_UP_RESOURCE_COIN = -1
-MIN_LEVEL = -1
-# PLUGINS_DIR = ["./plugins/examples"]  # 该家族只加载此目录下的插件，空=使用全局全部
+FAMILY_ID = "" 			#	家族id（抓包获取）
+ENABLE_POST = true 			#	帖子审核开关
+ENABLE_COMMENT = true 		#	帖子回复审核开关
+ENABLE_JOIN = false 			#	加入审核开关
+MID = "" 				#	MID，抓包获取
+ENABLE_UP = true 			#	up评论审核开关
+ENABLE_UP_RESOURCE = false 	#	uo资源审核开关
+MAX_UP_RESOURCE_COIN = -1 		#	最大金币数
+MIN_LEVEL = -1 			#	最低加入等级
+# PLUGINS_DIR = ["./plugins/examples"] # 该家族只加载此目录下的插件，空=使用全局全部
 
 [[TOKENS.FAMILIES]]
 MIN_LEVEL = -1
@@ -72,6 +75,9 @@ ENABLE_UP_RESOURCE = false
 MAX_UP_RESOURCE_COIN = -1
 FAMILY_ID = ""
 
+# 接下来你可以复制上面的结构，来让更多家族被审核
+
+#================= 接口配置区，请不要动 ====================
 [JOIN]
 ENABLED = true
 LIST_ENDPOINT = "/family/join/user-list"
