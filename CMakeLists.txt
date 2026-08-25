@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(auto_review VERSION 1.5.0 LANGUAGES CXX)
+project(auto_review VERSION 1.3.4 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -55,6 +55,7 @@ set(HEADERS
     tui.h
     web_panel.h
     plugins/plugin_manager.h
+    version.h
 )
 
 # ==================== 可执行文件 ====================

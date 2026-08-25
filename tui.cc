@@ -32,6 +32,8 @@
 #include <ncurses.h>
 #include <toml.hpp>
 
+#include "version.h"
+
 // ======================== 颜色对 ========================
 enum ColorPair {
     CP_HEADER_BG = 1,  // fg on cardBg   - 顶栏背景
@@ -271,7 +273,7 @@ static void draw_header(int cols) {
     mvwhline(stdscr, 0, 0, ' ', cols);
 
     wattron(stdscr, A_BOLD);
-    mvwprintw(stdscr, 0, 2, "high_bot 自动审核 TUI  v1.3.0");
+    mvwprintw(stdscr, 0, 2, "high_bot 自动审核 TUI  " APP_VERSION);
     wattroff(stdscr, A_BOLD);
 
     std::string hints;

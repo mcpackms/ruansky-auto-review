@@ -49,6 +49,7 @@
 #include "tui.h"
 #include "web_panel.h"
 #include "plugins/plugin_manager.h"
+#include "version.h"
 
 // ==================== 辅助函数 ====================
 [[nodiscard]] static int safe_stoi(const std::string& s, int default_val = -1) {
@@ -2205,7 +2206,7 @@ static bool migrate_config(const std::string& old_path, const std::string& new_p
 
 // ==================== 主函数 ====================
 static void print_help(const char* prog) {
-    printf("high_bot 自动审核 v1.3.0 开源版\n\n");
+    printf("high_bot 自动审核 " APP_VERSION " 开源版\n\n");
     printf("用法: %s [选项]\n\n", prog);
     printf("选项:\n");
     printf("  -h, --help      显示此帮助信息\n");
@@ -2260,7 +2261,7 @@ int main(int argc, char* argv[]) {
     curl_global_init(CURL_GLOBAL_ALL);
     try {
         g_start_time = static_cast<int>(time(nullptr));
-        g_log.info("high_bot自动审核 v1.3.0 开源版");
+        g_log.info("high_bot自动审核 " APP_VERSION " 开源版");
         g_log.info("配置文件:\t%s", g_config_path.c_str());
         load_config(g_config_path);
 

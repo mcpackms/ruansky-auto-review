@@ -3,3 +3,5 @@ plugins/data/
 pi-session-*.html
 *.o
 *.bak
+.pi
+.cache

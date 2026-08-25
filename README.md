@@ -1,7 +1,7 @@
 # ruansky_auto_review
 
 RUANAKY平台内容审核机器人
-
+版本 1.3.5
 ### 编译依赖
 
 - CMake >= 3.14
@@ -15,7 +15,7 @@ RUANAKY平台内容审核机器人
 - toml11
 - **Node.js >= 18** (JS 插件引擎，运行时依赖)
 
-### debian
+### Debian
 
 ```bash
 sudo apt update
@@ -30,7 +30,7 @@ sudo apt install -y \
     libtoml11-dev
 ```
 
-### redhat
+### Redhat
 
 ```bash
 sudo dnf groupinstall -y "Development Tools"
@@ -45,7 +45,7 @@ sudo dnf install -y \
 sudo dnf install -y toml11-devel
 ```
 
-### archlinux
+### Archlinux
 
 ```bash
 sudo pacman -Sy --needed \
