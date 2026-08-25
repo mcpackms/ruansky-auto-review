@@ -2454,6 +2454,7 @@ int main(int argc, char* argv[]) {
     } catch (const std::exception& e) {
         g_log.error("❌\t异常: %s", e.what());
     }
+    g_plugin_mgr.stop_auto_reload();
     curl_global_cleanup();
     return 0;
 }

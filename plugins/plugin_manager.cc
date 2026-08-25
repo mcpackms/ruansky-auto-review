@@ -26,12 +26,10 @@
 #include <algorithm>
 #include <set>
 #include <signal.h>
-#include <sstream>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "config_types.h"
 #include "tui.h"
 
 // ==================== Global plugin manager ====================
@@ -709,7 +707,10 @@ void PluginManager::start_auto_reload(int interval_seconds) {
     auto_reload_running_ = true;
     auto t = std::thread([this, interval_seconds]() {
         while (auto_reload_running_) {
-            std::this_thread::sleep_for(std::chrono::seconds(interval_seconds));
+            // 将长时间睡眠拆分为 1 秒的片段，及时响应停止信号
+            for (int i = 0; i < interval_seconds && auto_reload_running_; ++i) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
             if (!auto_reload_running_) break;
             try {
                 check_and_reload();
