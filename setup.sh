@@ -44,7 +44,7 @@ install_deps() {
         termux)
             setup_termux
             apt install -y build-essential cmake ninja ncurses \
-                libcurl openssl pcre2 nlohmann-json toml11 nodejs git
+                libcurl openssl pcre2 nlohmann-json toml11 git
             ;;
         debian|ubuntu)
             sudo apt update
