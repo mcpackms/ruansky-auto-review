@@ -32,10 +32,11 @@ detect_os() {
 
 setup_termux() {
     log_step "配置 Termux 环境"
-    termux-setup-storage >/dev/null 2>&1 || true
+    timeout 3 termux-setup-storage >/dev/null 2>&1 || true
     
     sed -i 's@^\(deb.*stable main\)$@#\1\ndeb https://mirrors.tuna.tsinghua.edu.cn/termux/termux-packages-24 stable main@' $PREFIX/etc/apt/sources.list 2>/dev/null || true
-    apt update -qq
+    apt update -y
+    echo "配置完成"
 }
 
 install_deps() {
@@ -73,12 +74,6 @@ install_deps() {
 }
 
 choose_proxy() {
-    log_step "选择 GitHub 克隆方式"
-    echo "  1) 使用代理 (推荐国内用户)"
-    echo "  2) 直连 (国外用户或网络良好)"
-    echo "  3) 自动检测 (先直连，失败则切代理)"
-    read -p "[?] 请输入选项 [1/2/3]: " choice
-    
     case "$choice" in
         1)
             log_info "使用代理克隆..."
@@ -94,7 +89,7 @@ choose_proxy() {
                 git clone --depth 1 "${PROXY_URL}${REPO_URL}" "$INSTALL_DIR"
             ;;
         *)
-            log_warn "无效选项，使用自动检测"
+            log_warn "使用自动检测"
             git clone --depth 1 "$REPO_URL" "$INSTALL_DIR" 2>/dev/null || \
                 git clone --depth 1 "${PROXY_URL}${REPO_URL}" "$INSTALL_DIR"
             ;;
