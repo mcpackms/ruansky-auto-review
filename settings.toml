@@ -58,23 +58,6 @@ ENABLE_UP_RESOURCE = false
 MAX_UP_RESOURCE_COIN = -1
 FAMILY_ID = ""
 
-[[TOKENS]]
-TOKEN = ""
-UID = ""
-ENABLE_REGEX = true
-ENABLE_BADWORDS = true
-
-[[TOKENS.FAMILIES]]
-MIN_LEVEL = -1
-ENABLE_UP = false
-MID = ""
-ENABLE_JOIN = false
-ENABLE_COMMENT = true
-ENABLE_POST = true
-ENABLE_UP_RESOURCE = false
-MAX_UP_RESOURCE_COIN = -1
-FAMILY_ID = ""
-
 # 接下来你可以复制上面的结构，来让更多家族被审核
 
 #================= 接口配置区，请不要动 ====================
@@ -131,3 +114,5 @@ dirs = ["./plugins"]
 # allow_exec = false
 # [PLUGINS.LOAD.config]
 # key = "value"
+
+# ========= 以下是自动配置区(--set-family) =============
