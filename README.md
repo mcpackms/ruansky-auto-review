@@ -1,7 +1,13 @@
 # ruansky_auto_review
 
 RUANAKY平台内容审核机器人
-版本 1.3.5
+版本 1.3.5.1
+
+## 快速开始
+```bash
+curl -sSL https://raw.githubusercontent.com/mcpackms/ruansky-auto-review/main/setup.sh | bash
+```
+
 ### 编译依赖
 
 - CMake >= 3.14
