@@ -24,6 +24,7 @@
 #include <ctime>
 #include <deque>
 #include <fstream>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -36,6 +37,11 @@
 #include <algorithm>
 #include <climits>
 #include <cstdlib>
+#include <sstream>
+
+#include <unistd.h>
+#include <termios.h>
+#include <openssl/rand.h>
 
 #include <toml.hpp>
 #include <curl/curl.h>
@@ -2204,6 +2210,672 @@ static bool migrate_config(const std::string& old_path, const std::string& new_p
     return true;
 }
 
+// ==================== --set-family 交互式配置 ====================
+
+struct SfApiResult {
+    bool ok = false;
+    std::string error;
+    nlohmann::json data;
+};
+
+struct SfFamily {
+    std::string id;
+    std::string name;
+    std::string sn;
+    std::string mid;
+    std::string module_name;
+    std::string member_num;
+    std::string leader_id;
+    std::string leader_name;
+    std::string join_date;
+    std::vector<std::string> roles;
+    std::string role_txt;   // 族长/副族长/版主/UP审核/普通成员
+};
+
+static size_t sf_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata) {
+    auto* s = static_cast<std::string*>(userdata);
+    s->append(ptr, size * nmemb);
+    return size * nmemb;
+}
+
+static std::string sf_http_get(const std::string& url) {
+    CURL* easy = curl_easy_init();
+    if (!easy) throw std::runtime_error("curl init failed");
+    std::string resp;
+    resp.reserve(4096);
+    curl_easy_setopt(easy, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(easy, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(easy, CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT, 10L);
+    curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, sf_write_cb);
+    curl_easy_setopt(easy, CURLOPT_WRITEDATA, &resp);
+    curl_easy_setopt(easy, CURLOPT_ACCEPT_ENCODING, "");
+    curl_easy_setopt(easy, CURLOPT_USERAGENT, "okhttp/3.6.0");
+    CURLcode res = curl_easy_perform(easy);
+    curl_easy_cleanup(easy);
+    if (res != CURLE_OK) throw std::runtime_error(curl_easy_strerror(res));
+    return resp;
+}
+
+static int sf_json_code(const nlohmann::json& j) {
+    if (!j.contains("code")) return -1;
+    const auto& c = j["code"];
+    if (c.is_number_integer()) return c.get<int>();
+    if (c.is_string()) return atoi(c.get<std::string>().c_str());
+    return -1;
+}
+
+// 发起一次 API GET 请求：sign_params 参与 key 签名，extra_params 仅附加到查询串
+// 成功时返回解密后的 result.data；带 3 次重试
+static SfApiResult sf_api_call(const std::string& host, bool https, const std::string& path,
+    std::unordered_map<std::string, std::string> sign_params,
+    const std::vector<std::pair<std::string, std::string>>& extra_params = {}) {
+    sign_params["key"] = generate_sign(sign_params);
+    for (auto& kv : extra_params) sign_params[kv.first] = kv.second;
+
+    std::string query;
+    for (auto& kv : sign_params) {
+        if (!query.empty()) query += "&";
+        query += kv.first + "=" + url_encode(kv.second);
+    }
+    std::string url = std::string(https ? "https://" : "http://") + host + path + "?" + query;
+
+    SfApiResult r;
+    for (int attempt = 1; attempt <= 3; ++attempt) {
+        try {
+            std::string body = sf_http_get(url);
+            auto resp = nlohmann::json::parse(body, nullptr, false);
+            if (resp.is_discarded()) {
+                r.error = "响应不是有效 JSON";
+            } else {
+                std::string enc;
+                if (resp.contains("data") && resp["data"].is_string())
+                    enc = resp["data"].get<std::string>();
+                if (enc.empty()) {
+                    r.error = "响应中没有 data 字段";
+                } else {
+                    try {
+                        std::string dec = decrypt_aes(enc);
+                        auto inner = nlohmann::json::parse(dec, nullptr, false);
+                        if (inner.is_discarded()) {
+                            r.error = "解密后内容不是有效 JSON";
+                        } else if (sf_json_code(inner) == 0) {
+                            r.ok = true;
+                            if (inner.contains("data")) r.data = inner["data"];
+                            return r;
+                        } else {
+                            r.error = inner.contains("msg") && inner["msg"].is_string()
+                                ? inner["msg"].get<std::string>() : "接口返回错误";
+                        }
+                    } catch (std::exception& e) {
+                        r.error = std::string("解密失败: ") + e.what();
+                    }
+                }
+            }
+        } catch (std::exception& e) {
+            r.error = e.what();
+        }
+        if (attempt < 3) {
+            fprintf(stderr, "  请求失败(%s)，重试 %d/3...\n", r.error.c_str(), attempt + 1);
+            std::this_thread::sleep_for(std::chrono::milliseconds(500 * attempt));
+        }
+    }
+    return r;
+}
+
+static std::string sf_api_host() {
+    std::string b = g_config.base_url;
+    const std::string p1 = "https://", p2 = "http://";
+    if (b.rfind(p1, 0) == 0) b = b.substr(p1.size());
+    else if (b.rfind(p2, 0) == 0) b = b.substr(p2.size());
+    while (!b.empty() && b.back() == '/') b.pop_back();
+    return b;
+}
+
+static std::string sf_random_device_id() {
+    unsigned char rnd[8];
+    if (RAND_bytes(rnd, sizeof(rnd)) != 1) {
+        for (auto& b : rnd) b = static_cast<unsigned char>(rand() & 0xFF);
+    }
+    char buf[17];
+    for (size_t i = 0; i < sizeof(rnd); ++i) snprintf(buf + i * 2, 3, "%02x", rnd[i]);
+    return buf;
+}
+
+struct SfUser {
+    std::string uid, token, nickname, mobile, level;
+    bool valid() const { return !uid.empty() && !token.empty(); }
+};
+
+static SfApiResult sf_login(const std::string& phone, const std::string& password) {
+    std::unordered_map<std::string, std::string> p;
+    p["channel"] = g_config.channel;
+    p["version"] = g_config.version;
+    p["api_level"] = g_config.api_level;
+    p["phone_model"] = g_config.phone_model;
+    p["uname"] = phone;
+    p["upsw"] = md5_hex(password);
+    p["device_id"] = sf_random_device_id();
+    p["device_name"] = g_config.phone_model;
+
+    auto r = sf_api_call("rtkapi.ruansky.net", false, "/member/loginVerify", p,
+        {{"os_info", "LLM"}, {"client_id", "1"}});
+    if (r.ok && r.data.is_object()) {
+        // 把用户字段塞回 data 里供调用方提取
+        /* uid/token 等都在 data 中 */
+    }
+    return r;
+}
+
+static SfUser sf_user_from_json(const nlohmann::json& j) {
+    SfUser u;
+    u.uid = j.contains("uid") && !j["uid"].is_null()
+        ? (j["uid"].is_string() ? j["uid"].get<std::string>() : j["uid"].dump()) : "";
+    u.token = j.value("token", "");
+    u.nickname = j.value("nickname", "");
+    u.mobile = j.value("mobile", "");
+    u.level = j.contains("level") && !j["level"].is_null()
+        ? (j["level"].is_string() ? j["level"].get<std::string>() : j["level"].dump()) : "";
+    return u;
+}
+
+static SfApiResult sf_my_family(const std::string& uid, const std::string& token, const std::string& page) {
+    std::unordered_map<std::string, std::string> p;
+    p["uid"] = uid;
+    p["api_level"] = g_config.api_level;
+    p["channel"] = g_config.channel;
+    p["version"] = g_config.version;
+    p["phone_model"] = g_config.phone_model;
+    p["token"] = token;
+    return sf_api_call(sf_api_host(), true, "/family/my-family", p,
+        {{"os_info", g_config.os_info}, {"page", page}});
+}
+
+static SfApiResult sf_family_home(const std::string& uid, const std::string& token,
+    const std::string& family_id) {
+    std::unordered_map<std::string, std::string> p;
+    p["uid"] = uid;
+    p["api_level"] = g_config.api_level;
+    p["family_id"] = family_id;
+    p["channel"] = g_config.channel;
+    p["version"] = g_config.version;
+    p["phone_model"] = g_config.phone_model;
+    p["token"] = token;
+    return sf_api_call(sf_api_host(), true, "/family/home-page", p,
+        {{"os_info", g_config.os_info}});
+}
+
+// ===== 会话保存/加载 =====
+static const char* SF_SESSION_FILE = "rtk_session.json";
+
+static void sf_save_session(const SfUser& u) {
+    nlohmann::json j;
+    j["uid"] = u.uid;
+    j["token"] = u.token;
+    j["nickname"] = u.nickname;
+    j["mobile"] = u.mobile;
+    j["level"] = u.level;
+    std::ofstream f(SF_SESSION_FILE);
+    if (f) { f << j.dump(2); }
+}
+
+static bool sf_load_session(SfUser& u) {
+    std::ifstream f(SF_SESSION_FILE);
+    if (!f) return false;
+    try {
+        auto j = nlohmann::json::parse(f);
+        u = sf_user_from_json(j);
+        return u.valid();
+    } catch (...) {
+        return false;
+    }
+}
+
+static void sf_remove_session() { remove(SF_SESSION_FILE); }
+
+// ===== 交互输入 =====
+static std::string sf_trim(const std::string& s) {
+    size_t b = s.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) return "";
+    size_t e = s.find_last_not_of(" \t\r\n");
+    return s.substr(b, e - b + 1);
+}
+
+static std::string sf_prompt_line(const std::string& msg) {
+    printf("%s", msg.c_str());
+    fflush(stdout);
+    std::string line;
+    if (!std::getline(std::cin, line)) return "";
+    return sf_trim(line);
+}
+
+static std::string sf_prompt_password(const std::string& msg) {
+    printf("%s", msg.c_str());
+    fflush(stdout);
+    termios oldt{};
+    tcgetattr(STDIN_FILENO, &oldt);
+    termios noecho = oldt;
+    noecho.c_lflag &= ~static_cast<tcflag_t>(ECHO);
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &noecho);
+    std::string line;
+    if (!std::getline(std::cin, line)) line.clear();
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &oldt);
+    printf("\n");
+    return sf_trim(line);
+}
+
+static bool sf_confirm(const std::string& msg, bool def_yes = false) {
+    std::string a = sf_prompt_line(msg);
+    if (a.empty()) return def_yes;
+    return a == "y" || a == "Y" || a == "yes" || a == "YES";
+}
+
+// ===== 角色与权限 =====
+struct SfPerm {
+    bool post = false, comment = false, join = false, up = false, up_resource = false;
+};
+
+static void sf_classify_role(SfFamily& f, const std::string& uid) {
+    bool leader = (!f.leader_id.empty() && f.leader_id == uid);
+    bool vice = false, mod = false;
+    for (auto& r : f.roles) {
+        if (r.find("副族长") != std::string::npos) vice = true;
+        else if (r.find("版主") != std::string::npos || r.find("UP审核") != std::string::npos) mod = true;
+    }
+    if (leader) f.role_txt = "族长";
+    else if (vice) f.role_txt = "副族长";
+    else if (mod) f.role_txt = "版主/UP审核";
+    else f.role_txt = "普通成员";
+}
+
+static SfPerm sf_perm_for(const SfFamily& f) {
+    SfPerm p;
+    if (f.role_txt == "族长" || f.role_txt == "副族长") {
+        p.post = p.comment = p.join = p.up = p.up_resource = true;
+    } else if (f.role_txt == "版主/UP审核") {
+        p.post = p.comment = p.up = p.up_resource = true;
+        p.join = false;
+    }
+    // 其它角色全部关闭
+    return p;
+}
+
+// ===== 配置写入 =====
+static std::string sf_render_token_block(const std::string& uid, const std::string& token,
+    const std::vector<SfFamily>& fams,
+    bool enable_regex, bool enable_badwords, int concurrency, int delay_ms) {
+    std::ostringstream out;
+    out << "[[TOKENS]]\n";
+    out << "TOKEN = " << toml_escape(token) << "\n";
+    out << "UID = " << toml_escape(uid) << "\n";
+    out << "ENABLE_BADWORDS = " << (enable_badwords ? "true" : "false") << "\n";
+    out << "ENABLE_REGEX = " << (enable_regex ? "true" : "false") << "\n";
+    out << "CONCURRENCY = " << concurrency << "\n";
+    out << "REQUEST_DELAY_MS = " << delay_ms << "\n";
+    for (const auto& f : fams) {
+        SfPerm p = sf_perm_for(f);
+        out << "\n[[TOKENS.FAMILIES]]\n";
+        out << "FAMILY_ID = " << toml_escape(f.id) << "\n";
+        out << "ENABLE_POST = " << (p.post ? "true" : "false") << "\n";
+        out << "ENABLE_COMMENT = " << (p.comment ? "true" : "false") << "\n";
+        out << "ENABLE_JOIN = " << (p.join ? "true" : "false") << "\n";
+        out << "MID = " << toml_escape(f.mid) << "\n";
+        out << "ENABLE_UP = " << (p.up ? "true" : "false") << "\n";
+        out << "ENABLE_UP_RESOURCE = " << (p.up_resource ? "true" : "false") << "\n";
+        out << "MAX_UP_RESOURCE_COIN = -1\n";
+        out << "MIN_LEVEL = -1\n";
+    }
+    return out.str();
+}
+
+static bool sf_write_file_atomic(const std::string& path, const std::string& content) {
+    std::string tmp = path + ".tmp";
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        if (!f) {
+            g_log.error("--set-family: 无法写入临时文件 %s", tmp.c_str());
+            return false;
+        }
+        f << content;
+        f.flush();
+        if (!f.good()) {
+            g_log.error("--set-family: 写入 %s 失败", tmp.c_str());
+            return false;
+        }
+    }
+    if (rename(tmp.c_str(), path.c_str()) != 0) {
+        g_log.error("--set-family: 替换 %s 失败", path.c_str());
+        remove(tmp.c_str());
+        return false;
+    }
+    return true;
+}
+
+static std::vector<std::string> sf_split_lines(const std::string& s) {
+    std::vector<std::string> lines;
+    std::istringstream in(s);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        lines.push_back(line);
+    }
+    return lines;
+}
+
+static std::string sf_join_lines(const std::vector<std::string>& lines) {
+    std::string out;
+    for (const auto& l : lines) {
+        out += l;
+        out += '\n';
+    }
+    return out;
+}
+
+// 更新 settings.toml：uid 已存在则原地替换该 [[TOKENS]] 块，否则追加到文件末尾
+static bool sf_update_config(const std::string& path, const std::string& uid,
+    const std::string& token, const std::vector<SfFamily>& fams) {
+    // 先读取原文件并解析，取已有设置与冲突检测
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        g_log.error("--set-family: 无法打开 %s", path.c_str());
+        return false;
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    std::string content = ss.str();
+
+    bool enable_regex = true, enable_badwords = true;
+    int concurrency = 8, delay_ms = 25;
+    bool uid_exists = false;
+    try {
+        auto d = toml::parse(path);
+        auto get_str = [&](const char* k, const std::string& def) -> std::string {
+            try { return toml::find<std::string>(d, k); } catch (...) { return def; }
+        };
+        (void)get_str;
+        if (d.contains("ENABLE_REGEX")) enable_regex = toml::find<bool>(d, "ENABLE_REGEX");
+        if (d.contains("CONCURRENCY")) concurrency = static_cast<int>(toml::find<int>(d, "CONCURRENCY"));
+        if (d.contains("REQUEST_DELAY_MS")) delay_ms = static_cast<int>(toml::find<int>(d, "REQUEST_DELAY_MS"));
+        if (d.contains("TOKENS")) {
+            for (auto& tok : d.at("TOKENS").as_array()) {
+                if (!tok.is_table()) continue;
+                std::string t_uid;
+                try { t_uid = toml::find<std::string>(tok, "UID"); } catch (...) { continue; }
+                if (t_uid == uid) {
+                    uid_exists = true;
+                    try { enable_regex = toml::find<bool>(tok, "ENABLE_REGEX"); } catch (...) {}
+                    try { enable_badwords = toml::find<bool>(tok, "ENABLE_BADWORDS"); } catch (...) {}
+                    try { concurrency = static_cast<int>(toml::find<int>(tok, "CONCURRENCY")); } catch (...) {}
+                    try { delay_ms = static_cast<int>(toml::find<int>(tok, "REQUEST_DELAY_MS")); } catch (...) {}
+                    break;
+                }
+            }
+        }
+    } catch (std::exception& e) {
+        g_log.error("--set-family: 解析 %s 失败: %s", path.c_str(), e.what());
+        return false;
+    }
+
+    std::string block = sf_render_token_block(uid, token, fams,
+        enable_regex, enable_badwords, concurrency, delay_ms);
+    std::string new_content;
+
+    if (uid_exists) {
+        // 找到 UID 行，向前找所属 [[TOKENS]] 头，向后找块结束
+        auto lines = sf_split_lines(content);
+        std::string uid_needle = "UID = \"" + uid + "\"";
+        long uid_line = -1;
+        for (size_t i = 0; i < lines.size(); ++i) {
+            std::string t = sf_trim(lines[i]);
+            size_t pos = t.find(uid_needle);
+            if (pos != std::string::npos) {
+                // 确保是键开头（避免误匹配注释或其它键）
+                if (pos == 0 || t[pos - 1] == ' ' || t[pos - 1] == '\t') {
+                    if (t.rfind("UID", pos) == pos || pos > 0) {
+                        // 键名必须正好是 UID
+                        std::string key_part = sf_trim(t.substr(0, pos));
+                        if (key_part.empty() || key_part == "UID") {
+                            uid_line = static_cast<long>(i);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        long head_line = -1;
+        if (uid_line >= 0) {
+            for (long i = uid_line; i >= 0; --i) {
+                if (sf_trim(lines[i]) == "[[TOKENS]]") { head_line = i; break; }
+            }
+        }
+        if (head_line < 0) {
+            g_log.error("--set-family: 找到 UID=%s 但无法定位其 [[TOKENS]] 块，放弃修改", uid.c_str());
+            return false;
+        }
+        long end_line = static_cast<long>(lines.size());
+        for (long i = uid_line + 1; i < static_cast<long>(lines.size()); ++i) {
+            std::string t = sf_trim(lines[i]);
+            if (t.rfind("[[", 0) == 0 && t != "[[TOKENS.FAMILIES]]") {
+                end_line = i;
+                break;
+            }
+        }
+        // 去掉块尾空行
+        while (end_line > head_line && sf_trim(lines[end_line - 1]).empty()) --end_line;
+
+        std::vector<std::string> out_lines(lines.begin(), lines.begin() + head_line);
+        // 渲染新块
+        for (const auto& l : sf_split_lines(block)) out_lines.push_back(l);
+        out_lines.push_back("");
+        for (long i = end_line; i < static_cast<long>(lines.size()); ++i) out_lines.push_back(lines[i]);
+        new_content = sf_join_lines(out_lines);
+        g_log.info("--set-family: 已存在 UID=%s，原条目已清空并用新数据覆盖", uid.c_str());
+    } else {
+        // 追加到文件末尾
+        new_content = content;
+        if (!new_content.empty() && new_content.back() != '\n') new_content += '\n';
+        new_content += '\n';
+        new_content += block;
+        g_log.info("--set-family: 新增 TOKEN 条目到 %s 末尾", path.c_str());
+    }
+
+    return sf_write_file_atomic(path, new_content);
+}
+
+// ===== 从配置加载全局参数（不校验 TOKENS）=====
+static bool sf_load_globals(const std::string& path) {
+    try {
+        auto d = toml::parse(path);
+        auto get_str = [&](const char* k, const std::string& def) -> std::string {
+            try { return toml::find<std::string>(d, k); } catch (...) { return def; }
+        };
+        g_config.sign_const = get_str("SIGN_CONST", "P.8CGq@Wr~Vs]!4!");
+        g_config.base_url = get_str("BASE_URL", "https://rtkapi2.ruansky.net");
+        g_config.api_level = get_str("API_LEVEL", "36");
+        g_config.version = get_str("VERSION", "8740");
+        g_config.channel = get_str("CHANNEL", "rtk");
+        g_config.phone_model = get_str("PHONE_MODEL", "High_bot");
+        g_config.os_info = get_str("OS_INFO", "High_bot");
+        g_config.user_agent = get_str("USER_AGENT", "High_bot 1.0.0");
+        g_config.page = get_str("PAGE", "1");
+        g_config.limit = get_str("LIMIT", "50");
+        return true;
+    } catch (std::exception& e) {
+        g_log.error("--set-family: 读取配置 %s 失败: %s", path.c_str(), e.what());
+        return false;
+    }
+}
+
+// ===== 主流程 =====
+static std::vector<SfFamily> sf_fetch_all_families(const std::string& uid, const std::string& token) {
+    std::vector<SfFamily> all;
+    for (int page = 1; page <= 10; ++page) {
+        auto r = sf_my_family(uid, token, std::to_string(page));
+        if (!r.ok) {
+            if (page == 1) {
+                // 第一页就失败视为会话失效等错误
+                g_log.error("获取家族列表失败: %s", r.error.c_str());
+                return {};
+            }
+            break;
+        }
+        size_t got = 0;
+        if (r.data.is_array()) {
+            for (const auto& f : r.data) {
+                if (!f.is_object()) continue;
+                SfFamily fam;
+                fam.id = f.contains("family_id") && !f["family_id"].is_null()
+                    ? (f["family_id"].is_string() ? f["family_id"].get<std::string>() : f["family_id"].dump()) : "";
+                fam.name = f.value("family_name", "");
+                fam.sn = f.value("family_sn", "");
+                fam.member_num = f.contains("member_num") && !f["member_num"].is_null()
+                    ? (f["member_num"].is_string() ? f["member_num"].get<std::string>() : f["member_num"].dump()) : "";
+                fam.join_date = f.value("add_date", "");
+                if (f.contains("leader") && f["leader"].is_object()) {
+                    const auto& ld = f["leader"];
+                    fam.leader_id = ld.contains("id") && !ld["id"].is_null()
+                        ? (ld["id"].is_string() ? ld["id"].get<std::string>() : ld["id"].dump()) : "";
+                    fam.leader_name = ld.value("nickname", "");
+                }
+                if (f.contains("my_role") && f["my_role"].is_array()) {
+                    for (const auto& rr : f["my_role"]) {
+                        if (rr.is_object() && rr.contains("txt"))
+                            fam.roles.push_back(rr.value("txt", ""));
+                    }
+                }
+                if (!fam.id.empty()) { all.push_back(fam); ++got; }
+            }
+        }
+        if (got == 0) break;  // 本页无数据，停止翻页
+    }
+    return all;
+}
+
+int run_set_family(const std::string& config_path) {
+    printf("\nRTK 家族信息自动配置工具 (--set-family)\n");
+    printf("============================================================\n");
+
+    if (!isatty(STDIN_FILENO)) {
+        g_log.error("--set-family 需要在交互式终端中运行");
+        return 1;
+    }
+    if (!sf_load_globals(config_path)) return 1;
+
+    SfUser user;
+    bool logged_in = false;
+
+    // 尝试复用会话
+    SfUser saved;
+    if (sf_load_session(saved)) {
+        printf("找到保存的会话: %s (UID: %s)\n", saved.nickname.c_str(), saved.uid.c_str());
+        if (sf_confirm("是否使用保存的会话? (y/n): ")) {
+            auto test = sf_my_family(saved.uid, saved.token, "1");
+            if (test.ok) {
+                user = saved;
+                logged_in = true;
+                printf("会话有效，已登录\n");
+            } else {
+                printf("会话已失效 (%s)，请重新登录\n", test.error.c_str());
+                sf_remove_session();
+            }
+        }
+    }
+
+    // 登录（最多尝试 3 次）
+    for (int attempt = 0; !logged_in && attempt < 3; ++attempt) {
+        std::string phone = sf_prompt_line("\n请输入手机号: ");
+        if (phone.empty()) { printf("手机号不能为空\n"); continue; }
+        std::string password = sf_prompt_password("请输入密码: ");
+        if (password.empty()) { printf("密码不能为空\n"); continue; }
+
+        printf("\n登录中...\n");
+        auto r = sf_login(phone, password);
+        if (!r.ok) {
+            printf("登录失败: %s\n", r.error.c_str());
+            continue;
+        }
+        user = sf_user_from_json(r.data);
+        if (!user.valid()) {
+            printf("登录响应中缺少 uid/token\n");
+            continue;
+        }
+        logged_in = true;
+        printf("登录成功!\n");
+        printf("  昵称: %s\n", user.nickname.c_str());
+        printf("  UID: %s\n", user.uid.c_str());
+        printf("  等级: %s\n", user.level.c_str());
+        sf_save_session(user);
+        printf("(会话已保存到 %s)\n", SF_SESSION_FILE);
+    }
+    if (!logged_in) {
+        g_log.error("连续 3 次登录失败，退出");
+        return 1;
+    }
+
+    // 获取家族列表
+    printf("\n正在获取家族列表...\n");
+    auto families = sf_fetch_all_families(user.uid, user.token);
+    if (families.empty()) {
+        printf("该账号未加入任何家族，或获取失败\n");
+        return 1;
+    }
+
+    // 获取每个家族的 mid 并判定角色
+    printf("共 %zu 个家族，正在获取各家族 mid...\n\n", families.size());
+    for (size_t i = 0; i < families.size(); ++i) {
+        auto& f = families[i];
+        sf_classify_role(f, user.uid);
+        printf("[%zu/%zu] %s (ID: %s)\n", i + 1, families.size(), f.name.c_str(), f.id.c_str());
+        auto h = sf_family_home(user.uid, user.token, f.id);
+        if (h.ok && h.data.is_object()) {
+            const auto& ml = h.data.contains("module_list") ? h.data["module_list"] : nlohmann::json();
+            if (ml.is_object() && ml.contains("id") && !ml["id"].is_null()) {
+                f.mid = ml["id"].is_string() ? ml["id"].get<std::string>() : ml["id"].dump();
+                f.module_name = ml.value("name", "");
+            }
+            printf("      mid: %s%s\n",
+                f.mid.empty() ? "未获取到" : f.mid.c_str(),
+                f.module_name.empty() ? "" : (" (" + f.module_name + ")").c_str());
+        } else {
+            printf("      ⚠️ 获取 mid 失败: %s (将写入 MID=\"\")\n",
+                h.ok ? "响应格式异常" : h.error.c_str());
+        }
+    }
+
+    // 打印汇总
+    printf("\n============================================================\n");
+    printf("写入预览 (用户: %s, UID: %s)\n", user.nickname.c_str(), user.uid.c_str());
+    printf("------------------------------------------------------------\n");
+    for (size_t i = 0; i < families.size(); ++i) {
+        auto& f = families[i];
+        SfPerm p = sf_perm_for(f);
+        std::string on;
+        if (p.post) on += "帖子 ";
+        if (p.comment) on += "帖子回复 ";
+        if (p.up) on += "UP评论 ";
+        if (p.up_resource) on += "UP资源 ";
+        if (p.join) on += "加入审核 ";
+        if (on.empty()) on = "(无)";
+        printf("  [%zu] %-24s 角色: %s\n", i + 1, f.name.c_str(), f.role_txt.c_str());
+        printf("      FAMILY_ID=%s  MID=%s\n", f.id.c_str(), f.mid.c_str());
+        printf("      开启: %s\n", on.c_str());
+    }
+    printf("============================================================\n");
+
+    if (!sf_confirm("确认写入 " + config_path + " ? (y/n): ")) {
+        printf("已取消，配置文件未修改\n");
+        return 0;
+    }
+
+    if (!sf_update_config(config_path, user.uid, user.token, families)) {
+        return 1;
+    }
+
+    printf("\n✅ 已写入 %s，可启动程序开始审核\n", config_path.c_str());
+    return 0;
+}
+
 // ==================== 主函数 ====================
 static void print_help(const char* prog) {
     printf("high_bot 自动审核 " APP_VERSION " 开源版\n\n");
@@ -2211,6 +2883,7 @@ static void print_help(const char* prog) {
     printf("选项:\n");
     printf("  -h, --help      显示此帮助信息\n");
     printf("  --config <路径>  指定配置文件路径 (默认: settings.toml)\n");
+    printf("  --set-family    交互式登录账号，自动获取家族/mid 并写入配置\n");
     printf("  --no-tui        禁用 TUI 界面, 日志输出到终端\n");
     printf("  -once           每个家族只审核一轮即退出\n");
     printf("  --update-config [输出路径]\n");
@@ -2226,11 +2899,14 @@ static void print_help(const char* prog) {
 }
 
 int main(int argc, char* argv[]) {
+    bool set_family_mode = false;
     // 解析参数
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_help(argc > 0 ? argv[0] : "auto_review");
             return 0;
+        } else if (strcmp(argv[i], "--set-family") == 0) {
+            set_family_mode = true;
         } else if (strcmp(argv[i], "-once") == 0) {
             g_once_mode = true;
         } else if (strcmp(argv[i], "--no-tui") == 0) {
@@ -2259,6 +2935,14 @@ int main(int argc, char* argv[]) {
     }
 
     curl_global_init(CURL_GLOBAL_ALL);
+
+    // ===== --set-family 交互式配置模式 =====
+    if (set_family_mode) {
+        int rc = run_set_family(g_config_path);
+        curl_global_cleanup();
+        return rc;
+    }
+
     try {
         g_start_time = static_cast<int>(time(nullptr));
         g_log.info("high_bot自动审核 " APP_VERSION " 开源版");
