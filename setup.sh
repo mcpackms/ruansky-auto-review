@@ -43,25 +43,25 @@ install_deps() {
     case "$1" in
         termux)
             setup_termux
-            apt install -y -qq build-essential cmake ninja ncurses \
+            apt install -y build-essential cmake ninja ncurses \
                 libcurl openssl pcre2 nlohmann-json toml11 nodejs git
             ;;
         debian|ubuntu)
-            sudo apt update -qq
-            sudo apt install -y -qq build-essential cmake ninja-build \
+            sudo apt update
+            sudo apt install -y build-essential cmake ninja-build \
                 libncursesw5-dev libcurl4-openssl-dev libssl-dev \
                 libpcre2-dev nlohmann-json3-dev libtoml11-dev nodejs git
             ;;
         rhel|fedora|centos|rocky|almalinux)
-            sudo dnf install -y -q cmake ninja-build ncurses-devel \
+            sudo dnf install -y cmake ninja-build ncurses-devel \
                 libcurl-devel openssl-devel pcre2-devel json-devel \
                 toml11-devel nodejs git 2>/dev/null || \
-            sudo yum install -y -q cmake ninja-build ncurses-devel \
+            sudo yum install -y cmake ninja-build ncurses-devel \
                 libcurl-devel openssl-devel pcre2-devel json-devel \
                 toml11-devel nodejs git
             ;;
         arch|manjaro)
-            sudo pacman -Sy --needed --noconfirm -q base-devel cmake ninja ncurses \
+            sudo pacman -Sy --needed --noconfirm base-devel cmake ninja ncurses \
                 curl openssl pcre2 nlohmann-json toml11 nodejs git
             ;;
         *)
