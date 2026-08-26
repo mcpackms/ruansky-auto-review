@@ -2406,34 +2406,6 @@ static SfApiResult sf_family_home(const std::string& uid, const std::string& tok
         {{"os_info", g_config.os_info}});
 }
 
-// ===== 会话保存/加载 =====
-static const char* SF_SESSION_FILE = "rtk_session.json";
-
-static void sf_save_session(const SfUser& u) {
-    nlohmann::json j;
-    j["uid"] = u.uid;
-    j["token"] = u.token;
-    j["nickname"] = u.nickname;
-    j["mobile"] = u.mobile;
-    j["level"] = u.level;
-    std::ofstream f(SF_SESSION_FILE);
-    if (f) { f << j.dump(2); }
-}
-
-static bool sf_load_session(SfUser& u) {
-    std::ifstream f(SF_SESSION_FILE);
-    if (!f) return false;
-    try {
-        auto j = nlohmann::json::parse(f);
-        u = sf_user_from_json(j);
-        return u.valid();
-    } catch (...) {
-        return false;
-    }
-}
-
-static void sf_remove_session() { remove(SF_SESSION_FILE); }
-
 // ===== 交互输入 =====
 static std::string sf_trim(const std::string& s) {
     size_t b = s.find_first_not_of(" \t\r\n");
@@ -2710,44 +2682,37 @@ static bool sf_load_globals(const std::string& path) {
 // ===== 主流程 =====
 static std::vector<SfFamily> sf_fetch_all_families(const std::string& uid, const std::string& token) {
     std::vector<SfFamily> all;
-    for (int page = 1; page <= 10; ++page) {
-        auto r = sf_my_family(uid, token, std::to_string(page));
-        if (!r.ok) {
-            if (page == 1) {
-                // 第一页就失败视为会话失效等错误
-                g_log.error("获取家族列表失败: %s", r.error.c_str());
-                return {};
+    // 与 setfamily.js 一致：只取第一页。服务端会一次返回该账号全部家族。
+    auto r = sf_my_family(uid, token, "1");
+    if (!r.ok) {
+        g_log.error("获取家族列表失败: %s", r.error.c_str());
+        return {};
+    }
+    if (r.data.is_array()) {
+        for (const auto& f : r.data) {
+            if (!f.is_object()) continue;
+            SfFamily fam;
+            fam.id = f.contains("family_id") && !f["family_id"].is_null()
+                ? (f["family_id"].is_string() ? f["family_id"].get<std::string>() : f["family_id"].dump()) : "";
+            fam.name = f.value("family_name", "");
+            fam.sn = f.value("family_sn", "");
+            fam.member_num = f.contains("member_num") && !f["member_num"].is_null()
+                ? (f["member_num"].is_string() ? f["member_num"].get<std::string>() : f["member_num"].dump()) : "";
+            fam.join_date = f.value("add_date", "");
+            if (f.contains("leader") && f["leader"].is_object()) {
+                const auto& ld = f["leader"];
+                fam.leader_id = ld.contains("id") && !ld["id"].is_null()
+                    ? (ld["id"].is_string() ? ld["id"].get<std::string>() : ld["id"].dump()) : "";
+                fam.leader_name = ld.value("nickname", "");
             }
-            break;
-        }
-        size_t got = 0;
-        if (r.data.is_array()) {
-            for (const auto& f : r.data) {
-                if (!f.is_object()) continue;
-                SfFamily fam;
-                fam.id = f.contains("family_id") && !f["family_id"].is_null()
-                    ? (f["family_id"].is_string() ? f["family_id"].get<std::string>() : f["family_id"].dump()) : "";
-                fam.name = f.value("family_name", "");
-                fam.sn = f.value("family_sn", "");
-                fam.member_num = f.contains("member_num") && !f["member_num"].is_null()
-                    ? (f["member_num"].is_string() ? f["member_num"].get<std::string>() : f["member_num"].dump()) : "";
-                fam.join_date = f.value("add_date", "");
-                if (f.contains("leader") && f["leader"].is_object()) {
-                    const auto& ld = f["leader"];
-                    fam.leader_id = ld.contains("id") && !ld["id"].is_null()
-                        ? (ld["id"].is_string() ? ld["id"].get<std::string>() : ld["id"].dump()) : "";
-                    fam.leader_name = ld.value("nickname", "");
+            if (f.contains("my_role") && f["my_role"].is_array()) {
+                for (const auto& rr : f["my_role"]) {
+                    if (rr.is_object() && rr.contains("txt"))
+                        fam.roles.push_back(rr.value("txt", ""));
                 }
-                if (f.contains("my_role") && f["my_role"].is_array()) {
-                    for (const auto& rr : f["my_role"]) {
-                        if (rr.is_object() && rr.contains("txt"))
-                            fam.roles.push_back(rr.value("txt", ""));
-                    }
-                }
-                if (!fam.id.empty()) { all.push_back(fam); ++got; }
             }
+            if (!fam.id.empty()) all.push_back(fam);
         }
-        if (got == 0) break;  // 本页无数据，停止翻页
     }
     return all;
 }
@@ -2764,23 +2729,6 @@ int run_set_family(const std::string& config_path) {
 
     SfUser user;
     bool logged_in = false;
-
-    // 尝试复用会话
-    SfUser saved;
-    if (sf_load_session(saved)) {
-        printf("找到保存的会话: %s (UID: %s)\n", saved.nickname.c_str(), saved.uid.c_str());
-        if (sf_confirm("是否使用保存的会话? (y/n): ")) {
-            auto test = sf_my_family(saved.uid, saved.token, "1");
-            if (test.ok) {
-                user = saved;
-                logged_in = true;
-                printf("会话有效，已登录\n");
-            } else {
-                printf("会话已失效 (%s)，请重新登录\n", test.error.c_str());
-                sf_remove_session();
-            }
-        }
-    }
 
     // 登录（最多尝试 3 次）
     for (int attempt = 0; !logged_in && attempt < 3; ++attempt) {
@@ -2805,8 +2753,6 @@ int run_set_family(const std::string& config_path) {
         printf("  昵称: %s\n", user.nickname.c_str());
         printf("  UID: %s\n", user.uid.c_str());
         printf("  等级: %s\n", user.level.c_str());
-        sf_save_session(user);
-        printf("(会话已保存到 %s)\n", SF_SESSION_FILE);
     }
     if (!logged_in) {
         g_log.error("连续 3 次登录失败，退出");
